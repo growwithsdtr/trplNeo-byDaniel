@@ -88,6 +88,7 @@ export default function Home() {
   const [updateText, setUpdateText] = useState(updateExamples[0]);
   const [structuredUpdate, setStructuredUpdate] =
     useState<LiveLocalUpdate | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [travelerQuery, setTravelerQuery] = useState(travelerQueryExamples[0]);
   const [agentResult, setAgentResult] = useState<TravelerAgentResult | null>(null);
   const [handoffs, setHandoffs] = useState<BookingHandoff[]>([]);
@@ -122,10 +123,12 @@ export default function Home() {
       return;
     }
     if (nextStep === 2 && !structuredUpdate) {
-      handleExtractUpdate();
+      void handleExtractUpdate();
     }
     if (nextStep === 3 && structuredUpdate?.status !== "approved") {
-      handleApproveUpdate();
+      handleApproveUpdate(
+        structuredUpdate ?? deterministicExtractUpdate(updateText, selectedHotel)
+      );
     }
     if (nextStep === 5) {
       setTravelerQuery(travelerQueryExamples[0]);
@@ -147,16 +150,45 @@ export default function Home() {
     setSelectedHotelId("nikko-cedar-ryokan");
     setUpdateText(updateExamples[0]);
     setStructuredUpdate(null);
+    setIsExtracting(false);
     setTravelerQuery(travelerQueryExamples[0]);
     setAgentResult(null);
     setHandoffs([]);
     setLatestHandoff(null);
   }
 
-  function handleExtractUpdate() {
-    const extracted = deterministicExtractUpdate(updateText, selectedHotel);
-    setStructuredUpdate(extracted);
-    return extracted;
+  async function handleExtractUpdate() {
+    setIsExtracting(true);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8500);
+
+    try {
+      const response = await fetch("/api/extract-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          input: updateText,
+          hotelId: selectedHotel.id,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Extraction failed with ${response.status}`);
+      }
+      const payload = (await response.json()) as { update?: LiveLocalUpdate };
+      const extracted =
+        payload.update ?? deterministicExtractUpdate(updateText, selectedHotel);
+      setStructuredUpdate(extracted);
+      return extracted;
+    } catch (error) {
+      console.log("Client extraction fallback:", error);
+      const extracted = deterministicExtractUpdate(updateText, selectedHotel);
+      setStructuredUpdate(extracted);
+      return extracted;
+    } finally {
+      window.clearTimeout(timeout);
+      setIsExtracting(false);
+    }
   }
 
   function handleApproveUpdate(update = structuredUpdate) {
@@ -321,6 +353,7 @@ export default function Home() {
                 setUpdateText={setUpdateText}
                 structuredUpdate={structuredUpdate}
                 onExtract={handleExtractUpdate}
+                isExtracting={isExtracting}
                 onApprove={handleApproveUpdate}
                 onReject={() => setStructuredUpdate(null)}
                 auditLog={auditLog}
@@ -369,6 +402,7 @@ function ConsoleTab({
   setUpdateText,
   structuredUpdate,
   onExtract,
+  isExtracting,
   onApprove,
   onReject,
   auditLog,
@@ -379,7 +413,8 @@ function ConsoleTab({
   updateText: string;
   setUpdateText: (value: string) => void;
   structuredUpdate: LiveLocalUpdate | null;
-  onExtract: () => LiveLocalUpdate;
+  onExtract: () => Promise<LiveLocalUpdate>;
+  isExtracting: boolean;
   onApprove: () => void;
   onReject: () => void;
   auditLog: AuditLogEntry[];
@@ -433,9 +468,10 @@ function ConsoleTab({
               <button
                 type="button"
                 onClick={onExtract}
+                disabled={isExtracting}
                 className="inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
               >
-                Extract structured update
+                {isExtracting ? "Extracting..." : "Extract structured update"}
               </button>
               <button
                 type="button"

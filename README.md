@@ -100,7 +100,8 @@ vercel --prod
 
 Environment variables are optional:
 
-- `OPENAI_API_KEY` optional stretch only; the current Stage A-C demo works without it.
+- `OPENAI_API_KEY` optional; if present, update extraction uses OpenAI with an 8-second timeout and deterministic fallback.
+- `OPENAI_MODEL` optional; defaults to `gpt-4o-mini`.
 - `DEEPGRAM_API_KEY` optional stretch only; voice input is disabled when absent.
 
 The deployed demo must remain useful with no API keys.
