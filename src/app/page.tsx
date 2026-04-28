@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
   Bot,
@@ -34,8 +34,8 @@ type TravelerAgentMode = "deterministic" | "llm-grounded";
 const tabs: Array<{ id: TabId; label: string; icon: typeof ClipboardCheck }> = [
   { id: "console", label: "Okami-san Live Update Console", icon: ClipboardCheck },
   { id: "graph", label: "Live & Local Hotel Knowledge Graph", icon: Database },
-  { id: "agent", label: "Traveler AI Agent Simulation", icon: Bot },
   { id: "metrics", label: "Metrics & AI Discoverability Audit", icon: BadgeCheck },
+  { id: "agent", label: "Traveler AI Agent Simulation", icon: Bot },
 ];
 
 const tourSteps: TourStep[] = [
@@ -81,33 +81,108 @@ const tourSteps: TourStep[] = [
   },
 ];
 
+interface BookingIntent {
+  checkInDate: string;
+  checkOutDate: string;
+  guests: number;
+  roomType: string;
+  hotelName: string;
+  estimatedRateYen: number;
+  liveLocalUpdateUsed: string;
+}
+
+function cloneBaselineHotels() {
+  return JSON.parse(JSON.stringify(baselineHotels)) as HotelGraph[];
+}
+
+function findHotelById(hotels: HotelGraph[], hotelId: string) {
+  return hotels.find((hotel) => hotel.id === hotelId) ?? hotels[0];
+}
+
+function parseGuests(query: string) {
+  const normalized = query.toLowerCase();
+  if (
+    normalized.includes("wife and i") ||
+    normalized.includes("husband and i") ||
+    normalized.includes("partner and i") ||
+    normalized.includes("two people") ||
+    normalized.includes("two guests") ||
+    normalized.includes("2 people") ||
+    normalized.includes("2 guests")
+  ) {
+    return 2;
+  }
+  if (
+    normalized.includes("solo") ||
+    normalized.includes("alone") ||
+    normalized.includes("one person") ||
+    normalized.includes("1 guest")
+  ) {
+    return 1;
+  }
+  return 2;
+}
+
+function parseDemoDates(query: string) {
+  const normalized = query.toLowerCase();
+  if (normalized.includes("tomorrow")) {
+    return { checkInDate: "2026-04-29", checkOutDate: "2026-04-30" };
+  }
+  return { checkInDate: "2026-05-02", checkOutDate: "2026-05-03" };
+}
+
+function buildBookingIntent(
+  query: string,
+  result: TravelerAgentResult
+): BookingIntent {
+  const dates = parseDemoDates(query);
+
+  return {
+    ...dates,
+    guests: parseGuests(query),
+    roomType: result.availableRoom.roomType,
+    hotelName: result.hotelName,
+    estimatedRateYen: result.rateYen,
+    liveLocalUpdateUsed:
+      result.latestUpdatesUsed[0]?.travelerFacingSummary ??
+      "No query-relevant live/local update used.",
+  };
+}
+
 export default function Home() {
-  const [hotels, setHotels] = useState<HotelGraph[]>(baselineHotels);
+  const [hotels, setHotels] = useState<HotelGraph[]>(() => cloneBaselineHotels());
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("console");
   const [selectedHotelId, setSelectedHotelId] = useState(baselineHotels[0].id);
-  const [updateText, setUpdateText] = useState(updateExamples[0]);
+  const [updateText, setUpdateText] = useState(updateExamples[0].text);
   const [structuredUpdate, setStructuredUpdate] =
     useState<LiveLocalUpdate | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [operatorMessage, setOperatorMessage] = useState<string | null>(null);
   const [travelerQuery, setTravelerQuery] = useState(travelerQueryExamples[0]);
   const [agentResult, setAgentResult] = useState<TravelerAgentResult | null>(null);
   const [agentMode, setAgentMode] =
     useState<TravelerAgentMode>("deterministic");
   const [handoffs, setHandoffs] = useState<BookingHandoff[]>([]);
   const [latestHandoff, setLatestHandoff] = useState<BookingHandoff | null>(null);
+  const [handoffStatus, setHandoffStatus] = useState<"idle" | "created">("idle");
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
+  const extractionRequestId = useRef(0);
+  const agentRequestId = useRef(0);
 
   const selectedHotel = useMemo(
-    () =>
-      hotels.find((hotel) => hotel.id === selectedHotelId) ?? hotels[0],
+    () => findHotelById(hotels, selectedHotelId),
     [hotels, selectedHotelId]
   );
 
   const metrics = useMemo(
-    () => calculateMetrics(hotels, handoffs),
-    [hotels, handoffs]
+    () =>
+      calculateMetrics(
+        [selectedHotel],
+        handoffs.filter((handoff) => handoff.hotelId === selectedHotel.id)
+      ),
+    [selectedHotel, handoffs]
   );
   const jsonLd = useMemo(() => buildHotelJsonLd(selectedHotel), [selectedHotel]);
 
@@ -117,7 +192,7 @@ export default function Home() {
     setTourStep(0);
     setActiveTab("console");
     setSelectedHotelId("nikko-cedar-ryokan");
-    setUpdateText(updateExamples[0]);
+    setUpdateText(updateExamples[0].text);
   }
 
   function goToTourStep(nextStep: number) {
@@ -125,13 +200,13 @@ export default function Home() {
       setTourOpen(false);
       return;
     }
-    if (nextStep === 2 && !structuredUpdate) {
-      void handleExtractUpdate();
+
+    let updateForApproval = structuredUpdate;
+    if (nextStep >= 2 && !updateForApproval) {
+      updateForApproval = extractDeterministicForCurrentHotel();
     }
-    if (nextStep === 3 && structuredUpdate?.status !== "approved") {
-      handleApproveUpdate(
-        structuredUpdate ?? deterministicExtractUpdate(updateText, selectedHotel)
-      );
+    if (nextStep >= 3 && updateForApproval?.status !== "approved") {
+      handleApproveUpdate(updateForApproval);
     }
     if (nextStep === 5) {
       setTravelerQuery(travelerQueryExamples[0]);
@@ -148,21 +223,53 @@ export default function Home() {
   }
 
   function resetDemo() {
-    setHotels(baselineHotels);
+    setHotels(cloneBaselineHotels());
     setAuditLog([]);
+    setActiveTab("console");
     setSelectedHotelId("nikko-cedar-ryokan");
-    setUpdateText(updateExamples[0]);
+    setUpdateText(updateExamples[0].text);
     setStructuredUpdate(null);
     setIsExtracting(false);
+    setOperatorMessage(null);
     setTravelerQuery(travelerQueryExamples[0]);
     setAgentResult(null);
     setAgentMode("deterministic");
     setHandoffs([]);
     setLatestHandoff(null);
+    setHandoffStatus("idle");
+    setTourOpen(false);
+    setTourStep(0);
+    extractionRequestId.current += 1;
+    agentRequestId.current += 1;
+  }
+
+  function handleSelectedHotelChange(hotelId: string) {
+    setSelectedHotelId(hotelId);
+    setStructuredUpdate(null);
+    setIsExtracting(false);
+    setOperatorMessage(null);
+    setAgentResult(null);
+    setAgentMode("deterministic");
+    setLatestHandoff(null);
+    setHandoffStatus("idle");
+    extractionRequestId.current += 1;
+    agentRequestId.current += 1;
+  }
+
+  function extractDeterministicForCurrentHotel() {
+    const targetHotel = findHotelById(hotels, selectedHotelId);
+    const extracted = deterministicExtractUpdate(updateText, targetHotel);
+    setStructuredUpdate(extracted);
+    setOperatorMessage(null);
+    return extracted;
   }
 
   async function handleExtractUpdate() {
+    const requestId = extractionRequestId.current + 1;
+    extractionRequestId.current = requestId;
     setIsExtracting(true);
+    setOperatorMessage(null);
+    const targetHotel = findHotelById(hotels, selectedHotelId);
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 8500);
 
@@ -173,7 +280,7 @@ export default function Home() {
         signal: controller.signal,
         body: JSON.stringify({
           input: updateText,
-          hotelId: selectedHotel.id,
+          hotelId: targetHotel.id,
         }),
       });
       if (!response.ok) {
@@ -181,22 +288,41 @@ export default function Home() {
       }
       const payload = (await response.json()) as { update?: LiveLocalUpdate };
       const extracted =
-        payload.update ?? deterministicExtractUpdate(updateText, selectedHotel);
-      setStructuredUpdate(extracted);
+        payload.update ?? deterministicExtractUpdate(updateText, targetHotel);
+      if (requestId === extractionRequestId.current) {
+        setStructuredUpdate(extracted);
+      }
       return extracted;
     } catch (error) {
       console.log("Client extraction fallback:", error);
-      const extracted = deterministicExtractUpdate(updateText, selectedHotel);
-      setStructuredUpdate(extracted);
+      const extracted = deterministicExtractUpdate(updateText, targetHotel);
+      if (requestId === extractionRequestId.current) {
+        setStructuredUpdate(extracted);
+      }
       return extracted;
     } finally {
       window.clearTimeout(timeout);
-      setIsExtracting(false);
+      if (requestId === extractionRequestId.current) {
+        setIsExtracting(false);
+      }
     }
   }
 
   function handleApproveUpdate(update = structuredUpdate) {
-    if (!update) return;
+    if (!selectedHotelId) {
+      setOperatorMessage("Choose a hotel before approving an update.");
+      return;
+    }
+    if (!update || !("hotelId" in update)) {
+      setOperatorMessage("Extract an update before approving it.");
+      return;
+    }
+    const targetHotel = hotels.find((hotel) => hotel.id === update.hotelId);
+    if (!targetHotel) {
+      setOperatorMessage("The target hotel could not be found. Reset Demo and try again.");
+      return;
+    }
+
     const approvedUpdate: LiveLocalUpdate = {
       ...update,
       status: "approved",
@@ -207,7 +333,14 @@ export default function Home() {
     setHotels((currentHotels) =>
       currentHotels.map((hotel) => {
         if (hotel.id !== approvedUpdate.hotelId) return hotel;
-        const withoutDraftDuplicate = hotel.liveLocalUpdates.filter(
+        const liveLocalUpdates = Array.isArray(hotel.liveLocalUpdates)
+          ? hotel.liveLocalUpdates
+          : [];
+        const maintenanceNotices = Array.isArray(hotel.maintenanceNotices)
+          ? hotel.maintenanceNotices
+          : [];
+        const promotions = Array.isArray(hotel.promotions) ? hotel.promotions : [];
+        const withoutDraftDuplicate = liveLocalUpdates.filter(
           (existing) => existing.id !== approvedUpdate.id
         );
         return {
@@ -215,26 +348,22 @@ export default function Home() {
           liveLocalUpdates: [...withoutDraftDuplicate, approvedUpdate],
           maintenanceNotices:
             approvedUpdate.category === "maintenance"
-              ? [approvedUpdate.travelerFacingSummary, ...hotel.maintenanceNotices]
-              : hotel.maintenanceNotices,
+              ? [approvedUpdate.travelerFacingSummary, ...maintenanceNotices]
+              : maintenanceNotices,
           promotions:
             approvedUpdate.category === "promotion"
-              ? [approvedUpdate.travelerFacingSummary, ...hotel.promotions]
-              : hotel.promotions,
+              ? [approvedUpdate.travelerFacingSummary, ...promotions]
+              : promotions,
           lastVerifiedAt: approvedUpdate.lastVerifiedAt,
         };
       })
     );
 
-    const hotelName =
-      hotels.find((hotel) => hotel.id === approvedUpdate.hotelId)?.name ??
-      selectedHotel.name;
-
-    setAuditLog((entries) => [
+    setAuditLog((entries = []) => [
       {
         id: `audit-${approvedUpdate.id}`,
         timestamp: approvedUpdate.approvedAt ?? approvedUpdate.lastVerifiedAt,
-        hotel: hotelName,
+        hotel: targetHotel.name,
         category: approvedUpdate.category,
         source: approvedUpdate.source,
         riskLevel: approvedUpdate.riskLevel,
@@ -244,20 +373,26 @@ export default function Home() {
       ...entries,
     ]);
     setStructuredUpdate(approvedUpdate);
+    setOperatorMessage("Update approved and added to the current Hotel Knowledge Graph.");
   }
 
   function handleRunAgent() {
-    const result = runTravelerAgent(travelerQuery, hotels);
+    const currentHotel = findHotelById(hotels, selectedHotelId);
+    const result = runTravelerAgent(travelerQuery, [currentHotel]);
     setAgentResult(result);
     setAgentMode("deterministic");
-    setSelectedHotelId(result.matchedHotelId);
-    void requestGroundedTravelerAgent(travelerQuery, hotels);
+    setLatestHandoff(null);
+    setHandoffStatus("idle");
+    const requestId = agentRequestId.current + 1;
+    agentRequestId.current = requestId;
+    void requestGroundedTravelerAgent(travelerQuery, [currentHotel], requestId);
     return result;
   }
 
   async function requestGroundedTravelerAgent(
     querySnapshot: string,
-    hotelsSnapshot: HotelGraph[]
+    hotelsSnapshot: HotelGraph[],
+    requestId: number
   ) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 8500);
@@ -282,16 +417,20 @@ export default function Home() {
         result?: TravelerAgentResult;
       };
 
+      if (requestId !== agentRequestId.current) {
+        return;
+      }
       if (payload.result) {
         setAgentResult(payload.result);
-        setSelectedHotelId(payload.result.matchedHotelId);
       }
       setAgentMode(
         payload.mode === "llm-grounded" ? "llm-grounded" : "deterministic"
       );
     } catch (error) {
       console.log("Traveler agent client fallback:", error);
-      setAgentMode("deterministic");
+      if (requestId === agentRequestId.current) {
+        setAgentMode("deterministic");
+      }
     } finally {
       window.clearTimeout(timeout);
     }
@@ -299,20 +438,26 @@ export default function Home() {
 
   function handleCreateHandoff(result = agentResult) {
     if (!result) return null;
+    const intent = buildBookingIntent(travelerQuery, result);
     const handoff: BookingHandoff = {
       id: `handoff-${Date.now()}`,
       hotelId: result.matchedHotelId,
       hotelName: result.hotelName,
-      roomType: result.availableRoom.roomType,
-      dates: result.availableRoom.date,
+      roomType: intent.roomType,
+      dates: `${intent.checkInDate} to ${intent.checkOutDate}`,
+      checkInDate: intent.checkInDate,
+      checkOutDate: intent.checkOutDate,
+      guests: intent.guests,
       rateYen: result.rateYen,
+      liveLocalUpdateUsed: intent.liveLocalUpdateUsed,
       bookingUrl: `https://example.com/triplaNeoByDaniel/book/${result.matchedHotelId}?room=${encodeURIComponent(
-        result.availableRoom.roomType
-      )}&date=${result.availableRoom.date}`,
+        intent.roomType
+      )}&checkIn=${intent.checkInDate}&checkOut=${intent.checkOutDate}&guests=${intent.guests}`,
       createdAt: "2026-04-28T12:06:00+09:00",
     };
     setHandoffs((current) => [handoff, ...current]);
     setLatestHandoff(handoff);
+    setHandoffStatus("created");
     return handoff;
   }
 
@@ -356,9 +501,10 @@ export default function Home() {
             </div>
           </div>
           <div className="mt-5 grid gap-3 border-t border-zinc-100 pt-5 text-sm text-zinc-600 md:grid-cols-3">
-            <p>Live & local hotel knowledge</p>
-            <p>AI discoverability</p>
-            <p>Verified direct booking handoff</p>
+            <p className="md:col-span-3">
+              Live & local hotel knowledge → AI discoverability → verified direct
+              booking handoff
+            </p>
           </div>
         </header>
 
@@ -396,7 +542,7 @@ export default function Home() {
               <ConsoleTab
                 hotels={hotels}
                 selectedHotelId={selectedHotelId}
-                setSelectedHotelId={setSelectedHotelId}
+                setSelectedHotelId={handleSelectedHotelChange}
                 updateText={updateText}
                 setUpdateText={setUpdateText}
                 structuredUpdate={structuredUpdate}
@@ -405,6 +551,7 @@ export default function Home() {
                 onApprove={handleApproveUpdate}
                 onReject={() => setStructuredUpdate(null)}
                 auditLog={auditLog}
+                operatorMessage={operatorMessage}
               />
             ) : null}
             {activeTab === "graph" ? (
@@ -412,16 +559,20 @@ export default function Home() {
             ) : null}
             {activeTab === "agent" ? (
               <AgentTab
+                selectedHotelName={selectedHotel.name}
                 travelerQuery={travelerQuery}
                 setTravelerQuery={setTravelerQuery}
                 agentResult={agentResult}
                 agentMode={agentMode}
                 onRunAgent={handleRunAgent}
                 handoff={latestHandoff}
+                handoffStatus={handoffStatus}
                 onCreateHandoff={handleCreateHandoff}
               />
             ) : null}
-            {activeTab === "metrics" ? <MetricsTab metrics={metrics} /> : null}
+            {activeTab === "metrics" ? (
+              <MetricsTab metrics={metrics} selectedHotelName={selectedHotel.name} />
+            ) : null}
           </section>
         </section>
 
@@ -455,6 +606,7 @@ function ConsoleTab({
   onApprove,
   onReject,
   auditLog,
+  operatorMessage,
 }: {
   hotels: HotelGraph[];
   selectedHotelId: string;
@@ -467,6 +619,7 @@ function ConsoleTab({
   onApprove: () => void;
   onReject: () => void;
   auditLog: AuditLogEntry[];
+  operatorMessage: string | null;
 }) {
   const selectedHotel =
     hotels.find((hotel) => hotel.id === selectedHotelId) ?? hotels[0];
@@ -478,6 +631,9 @@ function ConsoleTab({
         title="Okami-san Live Update Console"
         description="Hotel staff add live, local, time-sensitive information. The demo extracts structured fields, flags risk, and requires approval before publishing."
       >
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
+          Current hotel context: {selectedHotel.name}
+        </div>
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
           <div className="space-y-4">
             <HotelSelector
@@ -501,15 +657,18 @@ function ConsoleTab({
             <div className="flex flex-wrap gap-2">
               {updateExamples.map((example) => (
                 <button
-                  key={example}
+                  key={example.label}
                   type="button"
                   onClick={() => {
-                    setUpdateText(example);
+                    setUpdateText(example.text);
                     onReject();
                   }}
-                  className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-left text-xs font-medium text-zinc-600 shadow-sm"
+                  className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-left text-xs text-zinc-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
                 >
-                  {example}
+                  <span className="font-semibold text-zinc-900">
+                    {example.label}:
+                  </span>{" "}
+                  {example.text}
                 </button>
               ))}
             </div>
@@ -540,10 +699,15 @@ function ConsoleTab({
             reviewable graph mutation.
           </div>
         )}
+        {operatorMessage ? (
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-700">
+            {operatorMessage}
+          </div>
+        ) : null}
       </Panel>
       <Guardrails />
       <Panel
-        eyebrow="Selected hotel"
+        eyebrow="Current hotel context"
         title={selectedHotel.name}
         description={selectedHotel.shortDescription}
       >
@@ -567,7 +731,7 @@ function KnowledgeGraphTab({
   hotel,
   jsonLd,
 }: {
-  hotel: (typeof baselineHotels)[number];
+  hotel: HotelGraph;
   jsonLd: unknown;
 }) {
   const [copied, setCopied] = useState(false);
@@ -607,6 +771,14 @@ function KnowledgeGraphTab({
                 </h3>
               </div>
               <div className="flex flex-wrap gap-2">
+                <a
+                  href={`/api/schema/${hotel.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                >
+                  Open JSON-LD URL
+                </a>
                 <button
                   type="button"
                   onClick={copyJsonLd}
@@ -635,22 +807,40 @@ function KnowledgeGraphTab({
 }
 
 function AgentTab({
+  selectedHotelName,
   travelerQuery,
   setTravelerQuery,
   agentResult,
   agentMode,
   onRunAgent,
   handoff,
+  handoffStatus,
   onCreateHandoff,
 }: {
+  selectedHotelName: string;
   travelerQuery: string;
   setTravelerQuery: (query: string) => void;
   agentResult: TravelerAgentResult | null;
   agentMode: TravelerAgentMode;
   onRunAgent: () => TravelerAgentResult;
   handoff: BookingHandoff | null;
+  handoffStatus: "idle" | "created";
   onCreateHandoff: () => BookingHandoff | null;
 }) {
+  const handoffRef = useRef<HTMLDivElement>(null);
+  const bookingIntent = agentResult
+    ? buildBookingIntent(travelerQuery, agentResult)
+    : null;
+
+  useEffect(() => {
+    if (handoff) {
+      handoffRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }, [handoff]);
+
   return (
     <div className="grid gap-4">
       <Panel
@@ -658,6 +848,9 @@ function AgentTab({
         title="Traveler AI Agent Simulation"
         description="The simulated agent reads only from the current structured Hotel Knowledge Graph. It must not invent prices, availability, amenities, policies, or activities."
       >
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
+          Current hotel context: {selectedHotelName}
+        </div>
         <textarea
           value={travelerQuery}
           onChange={(event) => setTravelerQuery(event.target.value)}
@@ -710,6 +903,7 @@ function AgentTab({
               ) : null}
             </div>
           ) : null}
+          {bookingIntent ? <BookingIntentCard intent={bookingIntent} /> : null}
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
               <h3 className="text-sm font-semibold text-zinc-950">Matching criteria</h3>
@@ -764,10 +958,12 @@ function AgentTab({
           </div>
           <button
             type="button"
-            onClick={onCreateHandoff}
+            onClick={() => onCreateHandoff()}
             className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
           >
-            Generate direct booking handoff
+            {handoffStatus === "created"
+              ? "Booking handoff created"
+              : "Generate direct booking handoff"}
           </button>
         </Panel>
       ) : (
@@ -781,14 +977,27 @@ function AgentTab({
           </p>
         </Panel>
       )}
-      {handoff ? <BookingHandoffCard handoff={handoff} /> : null}
+      {handoff ? (
+        <div ref={handoffRef} tabIndex={-1}>
+          <BookingHandoffCard handoff={handoff} />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function MetricsTab({ metrics }: { metrics: ReturnType<typeof calculateMetrics> }) {
+function MetricsTab({
+  metrics,
+  selectedHotelName,
+}: {
+  metrics: ReturnType<typeof calculateMetrics>;
+  selectedHotelName: string;
+}) {
   return (
     <div className="grid gap-4">
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
+        Current hotel context: {selectedHotelName}
+      </div>
       <MetricsTiles metrics={metrics} />
       <Panel
         eyebrow="Outcome proxy"
@@ -890,7 +1099,7 @@ function StructuredUpdateCard({
       <JsonViewer value={update} title="Structured update JSON" />
       <button
         type="button"
-        onClick={onApprove}
+        onClick={() => onApprove()}
         disabled={update.status === "approved"}
         className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
@@ -943,6 +1152,38 @@ function AuditLog({ entries }: { entries: AuditLogEntry[] }) {
   );
 }
 
+function BookingIntentCard({ intent }: { intent: BookingIntent }) {
+  return (
+    <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-950">
+            Parsed booking intent
+          </h3>
+          <p className="mt-1 text-sm text-zinc-600">
+            Simple deterministic parsing for demo dates, guests, and best
+            matching room.
+          </p>
+        </div>
+        <span className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
+          {intent.guests} guests
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <Fact label="Selected hotel" value={intent.hotelName} />
+        <Fact label="Check-in" value={intent.checkInDate} />
+        <Fact label="Check-out" value={intent.checkOutDate} />
+        <Fact label="Room type" value={intent.roomType} />
+        <Fact
+          label="Estimated rate"
+          value={`¥${intent.estimatedRateYen.toLocaleString()}`}
+        />
+        <Fact label="Live/local update used" value={intent.liveLocalUpdateUsed} />
+      </div>
+    </div>
+  );
+}
+
 function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
   return (
     <Panel
@@ -956,10 +1197,16 @@ function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
         </div>
         <div className="space-y-3">
           <Fact label="Room" value={handoff.roomType} />
-          <Fact label="Date" value={handoff.dates} />
+          <Fact label="Check-in" value={handoff.checkInDate} />
+          <Fact label="Check-out" value={handoff.checkOutDate} />
+          <Fact label="Guests" value={handoff.guests.toString()} />
           <Fact
             label="Potential direct GMV"
             value={`¥${handoff.rateYen.toLocaleString()}`}
+          />
+          <Fact
+            label="Live/local update used"
+            value={handoff.liveLocalUpdateUsed}
           />
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
@@ -1070,7 +1317,7 @@ function Panel({
   );
 }
 
-function GraphCards({ hotel }: { hotel: (typeof baselineHotels)[number] }) {
+function GraphCards({ hotel }: { hotel: HotelGraph }) {
   const sections = [
     ["Rooms", hotel.roomTypes.map((room) => `${room.name}: ${room.capacity}`)],
     ["Rates", hotel.roomTypes.map((room) => `${room.name}: ¥${room.rateYen.toLocaleString()}`)],

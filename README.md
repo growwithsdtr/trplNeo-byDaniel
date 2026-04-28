@@ -46,6 +46,7 @@ If AI agents become a major travel discovery layer, hotels risk being represente
 - Direct booking handoff with dummy booking link and QR code.
 - Metrics that improve after approved updates and booking handoffs.
 - Schema.org JSON-LD preview with copy button and validator link.
+- Per-hotel JSON-LD URL for validator-friendly review.
 - Simulated MCP-style tool panel and stateless API endpoints.
 
 ## What is simulated
@@ -125,6 +126,7 @@ These endpoints are intentionally stateless and demo-only:
 - `POST /api/tools/check_availability`
 - `POST /api/tools/create_booking_handoff`
 - `POST /api/traveler-agent`
+- `GET /api/schema/[hotelId]`
 
 Label used in the app:
 

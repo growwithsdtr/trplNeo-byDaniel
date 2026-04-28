@@ -115,7 +115,11 @@ export interface BookingHandoff {
   hotelName: string;
   roomType: string;
   dates: string;
+  checkInDate: string;
+  checkOutDate: string;
+  guests: number;
   rateYen: number;
+  liveLocalUpdateUsed: string;
   bookingUrl: string;
   createdAt: string;
 }

@@ -11,31 +11,31 @@ export function MetricsTiles({ metrics }: MetricsTilesProps) {
     {
       label: "AI Discovery Readiness",
       value: `${metrics.aiDiscoveryReadiness}/100`,
-      detail: "Structured graph + approved live context",
+      detail: "How complete and machine-readable the hotel graph is.",
       icon: Gauge,
     },
     {
       label: "Freshness Score",
       value: `${metrics.freshnessScore}/100`,
-      detail: "Recency of operator-approved hotel facts",
+      detail: "How recently live/local facts were verified or updated.",
       icon: RefreshCcw,
     },
     {
       label: "Direct Booking Handoff Count",
       value: metrics.directBookingHandoffCount.toString(),
-      detail: "Verified quote-to-direct link handoffs",
+      detail: "Mock direct-booking opportunities generated from AI discovery.",
       icon: Link2,
     },
     {
       label: "Incremental Direct GMV Potential",
       value: formatYen(metrics.incrementalDirectGmvPotential),
-      detail: "Mock value of direct handoff opportunities",
+      detail: "Potential direct revenue represented by generated booking handoffs.",
       icon: JapaneseYen,
     },
     {
       label: "Operator Time Saved Estimate",
       value: `${metrics.operatorTimeSavedMinutes} min`,
-      detail: "Reusable answers from one approved update",
+      detail: "Estimated manual update/support time avoided.",
       icon: Clock,
     },
   ];

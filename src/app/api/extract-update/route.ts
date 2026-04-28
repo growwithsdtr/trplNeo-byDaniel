@@ -33,13 +33,40 @@ function normalizeOpenAiUpdate(
   parsed: Record<string, unknown>,
   fallback: LiveLocalUpdate
 ): LiveLocalUpdate {
-  const riskLevel = isRiskLevel(parsed.riskLevel)
-    ? parsed.riskLevel
-    : fallback.riskLevel;
   const travelerFacingSummary =
     typeof parsed.travelerFacingSummary === "string"
       ? parsed.travelerFacingSummary
       : fallback.travelerFacingSummary;
+  const priceImpact =
+    typeof parsed.priceImpact === "string"
+      ? parsed.priceImpact
+      : fallback.priceImpact;
+  const riskText = `${travelerFacingSummary} ${priceImpact}`.toLowerCase();
+  const hasHighRiskTerm = [
+    "price",
+    "¥",
+    "payment",
+    "cancel",
+    "refund",
+    "closure",
+    "closed",
+    "maintenance",
+    "clean",
+    "cleanliness",
+    "safe",
+    "safety",
+  ].some((term) => riskText.includes(term));
+  const riskLevel = hasHighRiskTerm
+    ? "high"
+    : isRiskLevel(parsed.riskLevel)
+      ? parsed.riskLevel
+      : fallback.riskLevel;
+  const requiresApproval =
+    riskLevel === "high"
+      ? true
+      : typeof parsed.requiresApproval === "boolean"
+        ? parsed.requiresApproval
+        : fallback.requiresApproval;
 
   return {
     ...fallback,
@@ -56,20 +83,14 @@ function normalizeOpenAiUpdate(
       typeof parsed.affectedOffer === "string"
         ? parsed.affectedOffer
         : fallback.affectedOffer,
-    priceImpact:
-      typeof parsed.priceImpact === "string"
-        ? parsed.priceImpact
-        : fallback.priceImpact,
+    priceImpact,
     travelerFacingSummary,
     internalNotes:
       typeof parsed.internalNotes === "string"
         ? parsed.internalNotes
         : "OpenAI structured extraction with deterministic fallback available.",
     riskLevel,
-    requiresApproval:
-      typeof parsed.requiresApproval === "boolean"
-        ? parsed.requiresApproval
-        : riskLevel === "high",
+    requiresApproval,
     confidence:
       typeof parsed.confidence === "number" ? parsed.confidence : fallback.confidence,
     preview: {

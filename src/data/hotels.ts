@@ -386,13 +386,34 @@ export const baselineHotels: HotelGraph[] = [
 ];
 
 export const updateExamples = [
-  "Tomorrow the outdoor onsen will have yuzu aroma.",
-  "The private bath is under maintenance on Wednesday morning.",
-  "Guests booking the kaiseki plan tomorrow will receive local strawberry dessert.",
-  "Dogs under 10kg are allowed in the garden-view rooms this weekend.",
-  "The Wi-Fi speed in business rooms was verified today at 180 Mbps.",
-  "Lake cycling tours are available Saturday at 9:00 and 14:00 for ¥3,000.",
-  "Many Korean guests ask about vegetarian breakfast; mark vegetarian breakfast as available with advance notice.",
+  {
+    label: "Onsen update",
+    text: "Tomorrow the outdoor onsen will have yuzu aroma.",
+  },
+  {
+    label: "Business hotel update",
+    text: "The Wi-Fi speed in business rooms was verified today at 180 Mbps.",
+  },
+  {
+    label: "Pet policy update",
+    text: "Dogs under 10kg are allowed in garden-view rooms this weekend.",
+  },
+  {
+    label: "Activity update",
+    text: "Lake cycling tours are available Saturday at 9:00 and 14:00 for ¥3,000.",
+  },
+  {
+    label: "Maintenance update",
+    text: "The private bath is under maintenance on Wednesday morning.",
+  },
+  {
+    label: "Meal plan update",
+    text: "Guests booking the kaiseki plan tomorrow will receive local strawberry dessert.",
+  },
+  {
+    label: "Guest insight",
+    text: "Many Korean guests ask about vegetarian breakfast; mark vegetarian breakfast as available with advance notice.",
+  },
 ];
 
 export const travelerQueryExamples = [
