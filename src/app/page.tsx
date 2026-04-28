@@ -11,6 +11,7 @@ import {
   RotateCcw,
   Sparkles,
 } from "lucide-react";
+import { QRCodeCanvas } from "qrcode.react";
 import { DemoTour, type TourStep } from "@/components/demo-tour";
 import { HotelSelector } from "@/components/hotel-selector";
 import { JsonViewer } from "@/components/json-viewer";
@@ -20,7 +21,12 @@ import { runTravelerAgent, type TravelerAgentResult } from "@/lib/agent";
 import { deterministicExtractUpdate } from "@/lib/extraction";
 import { calculateMetrics } from "@/lib/metrics";
 import { buildHotelJsonLd } from "@/lib/schema";
-import type { AuditLogEntry, HotelGraph, LiveLocalUpdate } from "@/lib/types";
+import type {
+  AuditLogEntry,
+  BookingHandoff,
+  HotelGraph,
+  LiveLocalUpdate,
+} from "@/lib/types";
 
 type TabId = "console" | "graph" | "agent" | "metrics";
 
@@ -84,6 +90,8 @@ export default function Home() {
     useState<LiveLocalUpdate | null>(null);
   const [travelerQuery, setTravelerQuery] = useState(travelerQueryExamples[0]);
   const [agentResult, setAgentResult] = useState<TravelerAgentResult | null>(null);
+  const [handoffs, setHandoffs] = useState<BookingHandoff[]>([]);
+  const [latestHandoff, setLatestHandoff] = useState<BookingHandoff | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
 
@@ -93,7 +101,10 @@ export default function Home() {
     [hotels, selectedHotelId]
   );
 
-  const metrics = useMemo(() => calculateMetrics(hotels), [hotels]);
+  const metrics = useMemo(
+    () => calculateMetrics(hotels, handoffs),
+    [hotels, handoffs]
+  );
   const jsonLd = useMemo(() => buildHotelJsonLd(selectedHotel), [selectedHotel]);
 
   function startTour() {
@@ -122,6 +133,10 @@ export default function Home() {
     if (nextStep === 6) {
       handleRunAgent();
     }
+    if (nextStep === 7) {
+      const result = agentResult ?? handleRunAgent();
+      handleCreateHandoff(result);
+    }
     setTourStep(nextStep);
     setActiveTab(tourSteps[nextStep].tab as TabId);
   }
@@ -134,6 +149,8 @@ export default function Home() {
     setStructuredUpdate(null);
     setTravelerQuery(travelerQueryExamples[0]);
     setAgentResult(null);
+    setHandoffs([]);
+    setLatestHandoff(null);
   }
 
   function handleExtractUpdate() {
@@ -198,6 +215,25 @@ export default function Home() {
     setAgentResult(result);
     setSelectedHotelId(result.matchedHotelId);
     return result;
+  }
+
+  function handleCreateHandoff(result = agentResult) {
+    if (!result) return null;
+    const handoff: BookingHandoff = {
+      id: `handoff-${Date.now()}`,
+      hotelId: result.matchedHotelId,
+      hotelName: result.hotelName,
+      roomType: result.availableRoom.roomType,
+      dates: result.availableRoom.date,
+      rateYen: result.rateYen,
+      bookingUrl: `https://example.com/triplaNeoByDaniel/book/${result.matchedHotelId}?room=${encodeURIComponent(
+        result.availableRoom.roomType
+      )}&date=${result.availableRoom.date}`,
+      createdAt: "2026-04-28T12:06:00+09:00",
+    };
+    setHandoffs((current) => [handoff, ...current]);
+    setLatestHandoff(handoff);
+    return handoff;
   }
 
   return (
@@ -299,6 +335,8 @@ export default function Home() {
                 setTravelerQuery={setTravelerQuery}
                 agentResult={agentResult}
                 onRunAgent={handleRunAgent}
+                handoff={latestHandoff}
+                onCreateHandoff={handleCreateHandoff}
               />
             ) : null}
             {activeTab === "metrics" ? <MetricsTab metrics={metrics} /> : null}
@@ -447,6 +485,15 @@ function KnowledgeGraphTab({
   hotel: (typeof baselineHotels)[number];
   jsonLd: unknown;
 }) {
+  const [copied, setCopied] = useState(false);
+  const jsonLdString = JSON.stringify(jsonLd, null, 2);
+
+  async function copyJsonLd() {
+    await navigator.clipboard.writeText(jsonLdString);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
   return (
     <div className="grid gap-4">
       <Panel
@@ -464,7 +511,38 @@ function KnowledgeGraphTab({
         <GraphCards hotel={hotel} />
         <div className="space-y-4">
           <JsonViewer value={hotel} title="Developer JSON graph view" />
-          <JsonViewer value={jsonLd} title="Schema.org JSON-LD preview" />
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.16em] text-blue-600">
+                  Schema.org validator affordance
+                </p>
+                <h3 className="mt-1 text-base font-semibold text-zinc-950">
+                  JSON-LD preview
+                </h3>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={copyJsonLd}
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                >
+                  {copied ? "Copied" : "Copy JSON-LD"}
+                </button>
+                <a
+                  href="https://validator.schema.org/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-9 items-center justify-center rounded-md bg-zinc-950 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+                >
+                  Open Schema Validator
+                </a>
+              </div>
+            </div>
+            <div className="mt-4">
+              <JsonViewer value={jsonLd} title="Schema.org JSON-LD preview" />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -476,11 +554,15 @@ function AgentTab({
   setTravelerQuery,
   agentResult,
   onRunAgent,
+  handoff,
+  onCreateHandoff,
 }: {
   travelerQuery: string;
   setTravelerQuery: (query: string) => void;
   agentResult: TravelerAgentResult | null;
   onRunAgent: () => TravelerAgentResult;
+  handoff: BookingHandoff | null;
+  onCreateHandoff: () => BookingHandoff | null;
 }) {
   return (
     <div className="grid gap-4">
@@ -572,6 +654,13 @@ function AgentTab({
               </p>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={onCreateHandoff}
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
+          >
+            Generate direct booking handoff
+          </button>
         </Panel>
       ) : (
         <Panel
@@ -584,6 +673,7 @@ function AgentTab({
           </p>
         </Panel>
       )}
+      {handoff ? <BookingHandoffCard handoff={handoff} /> : null}
     </div>
   );
 }
@@ -601,8 +691,7 @@ function MetricsTab({ metrics }: { metrics: ReturnType<typeof calculateMetrics> 
           <div className="rounded-lg border border-zinc-200 bg-white p-4">
             <p className="text-sm font-medium text-zinc-950">Simulated MCP-style tools</p>
             <p className="mt-2 text-sm leading-6 text-zinc-600">
-              Production would expose standards-compliant MCP. Stage C adds tool
-              cards and simple stateless API endpoints.
+              Simulated MCP-style tools — production would expose standards-compliant MCP.
             </p>
           </div>
           <div className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -614,6 +703,7 @@ function MetricsTab({ metrics }: { metrics: ReturnType<typeof calculateMetrics> 
           </div>
         </div>
       </Panel>
+      <McpToolsPanel />
     </div>
   );
 }
@@ -741,6 +831,106 @@ function AuditLog({ entries }: { entries: AuditLogEntry[] }) {
           </table>
         </div>
       )}
+    </Panel>
+  );
+}
+
+function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
+  return (
+    <Panel
+      eyebrow="Mock direct booking handoff created"
+      title={handoff.hotelName}
+      description="Payment integration is intentionally out of scope. The first milestone is proving AI discovery → verified quote → direct booking handoff."
+    >
+      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <QRCodeCanvas value={handoff.bookingUrl} size={180} includeMargin />
+        </div>
+        <div className="space-y-3">
+          <Fact label="Room" value={handoff.roomType} />
+          <Fact label="Date" value={handoff.dates} />
+          <Fact
+            label="Potential direct GMV"
+            value={`¥${handoff.rateYen.toLocaleString()}`}
+          />
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+              Dummy booking link
+            </p>
+            <a
+              href={handoff.bookingUrl}
+              className="mt-2 block break-all font-mono text-xs text-blue-700"
+            >
+              {handoff.bookingUrl}
+            </a>
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm leading-6 text-zinc-600">
+        No payment execution. Production integration would connect to triplaPay
+        and/or payment providers such as GMO where relevant.
+      </div>
+    </Panel>
+  );
+}
+
+function McpToolsPanel() {
+  const tools = [
+    {
+      name: "search_hotels",
+      method: "POST",
+      path: "/api/tools/search_hotels",
+      description: "Search synthetic hotels by traveler intent, dates, and guests.",
+    },
+    {
+      name: "get_hotel_context",
+      method: "POST",
+      path: "/api/tools/get_hotel_context",
+      description: "Return structured hotel context for AI-readable discovery.",
+    },
+    {
+      name: "check_availability",
+      method: "POST",
+      path: "/api/tools/check_availability",
+      description: "Return only mock availability and prices present in JSON.",
+    },
+    {
+      name: "create_booking_handoff",
+      method: "POST",
+      path: "/api/tools/create_booking_handoff",
+      description: "Create a simulated direct booking link without payment execution.",
+    },
+  ];
+
+  return (
+    <Panel
+      eyebrow="Tool/API thinking"
+      title="Simulated MCP-style tools"
+      description="Simulated MCP-style tools — production would expose standards-compliant MCP."
+    >
+      <div className="grid gap-3 md:grid-cols-2">
+        {tools.map((tool) => (
+          <div
+            key={tool.name}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-4"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-mono text-sm font-semibold text-zinc-950">
+                {tool.name}
+              </h3>
+              <span className="rounded-md bg-white px-2 py-1 font-mono text-xs text-zinc-600 ring-1 ring-zinc-200">
+                {tool.method}
+              </span>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">
+              {tool.description}
+            </p>
+            <p className="mt-3 break-all font-mono text-xs text-blue-700">
+              {tool.path}
+            </p>
+          </div>
+        ))}
+      </div>
     </Panel>
   );
 }

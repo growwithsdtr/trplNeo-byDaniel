@@ -1,36 +1,174 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# triplaNeoByDaniel
 
-## Getting Started
+Agentic Direct Booking Infrastructure for the AI Travel Era
 
-First, run the development server:
+Powered by a Live & Local Hotel Knowledge Graph
+
+Demo by Daniel Jimenez · Synthetic data · Senior PM Gen AI take-home prototype
+
+## Links
+
+- GitHub repo: https://github.com/growwithsdtr/trplNeo-byDaniel
+- Live deployed URL: https://trplaneo-by-daniel.vercel.app
+
+## What this demo proves
+
+`triplaNeoByDaniel` is a take-home strategy prototype for a Senior Product Manager - Gen AI role in hospitality SaaS. It demonstrates how independent hotels can protect direct-booking economics as travel discovery shifts from Google/OTA search to AI agents such as ChatGPT, Gemini, Claude, and Perplexity.
+
+The core product thesis:
+
+Live & local hotel knowledge -> AI discoverability -> verified direct booking handoff
+
+The demo shows that a hotel-owned, standards-aligned knowledge graph can be enriched by operators with fresh, local, time-sensitive information, then used by a traveler-facing AI agent to produce direct-bookable recommendations.
+
+## Why this matters strategically
+
+If AI agents become a major travel discovery layer, hotels risk being represented by stale OTA-controlled summaries instead of hotel-owned facts. triplaNeoByDaniel reframes the opportunity as direct-booking infrastructure:
+
+- AI Discoverability / AEO: make hotel-owned facts readable and citeable by agents.
+- Agentic Commerce Readiness: expose verified quote and booking-handoff actions.
+- Traveler-Facing AI: answer intent-rich traveler questions without inventing facts.
+- Operator AI: let hotel staff add live/local knowledge without complex dashboards.
+- Outcome Metrics: measure readiness, freshness, handoffs, GMV potential, and time saved.
+
+## What is implemented
+
+- Polished Next.js dashboard with four tabs.
+- Three deep synthetic Nikko-style hotels.
+- Schema.org-inspired hotel knowledge graph.
+- triplaNeo live/local enrichment layer.
+- Operator text update extraction using deterministic local logic.
+- Risk taxonomy and visible approval guardrails.
+- Human approval flow before publishing updates.
+- In-memory hotel graph mutation.
+- Traveler AI agent simulation that reads only from the current graph.
+- Direct booking handoff with dummy booking link and QR code.
+- Metrics that improve after approved updates and booking handoffs.
+- Schema.org JSON-LD preview with copy button and validator link.
+- Simulated MCP-style tool panel and stateless API endpoints.
+
+## What is simulated
+
+- PMS/channel availability.
+- tripla Book, Bot, Connect, Pay, CRM, and PMS enrichment.
+- MCP/UCP/AP2 production integrations.
+- triplaPay/GMO payment execution.
+- Real crawler ingestion.
+- Voice transcription.
+- Proprietary tripla data.
+
+## 90-second demo script
+
+1. Open the app and click **Start Demo Tour**.
+2. Select **Nikko Cedar Ryokan**.
+3. In the Okami-san console, use the example update: “Tomorrow the outdoor onsen will have yuzu aroma.”
+4. Extract the structured update and point out category, affected date, source, confidence, risk, and approval status.
+5. Approve the update and show the audit log entry.
+6. Move to the Knowledge Graph tab and show that the live/local update is now part of the hotel-owned graph.
+7. Open the Schema.org JSON-LD preview, copy it, and use the validator affordance if desired.
+8. Move to Metrics and show AI Discovery Readiness and Freshness improving.
+9. Run the traveler query: “I want a quiet ryokan in Nikko this weekend with onsen, local food, and a special experience.”
+10. Show that the traveler agent cites **Source: Hotel Knowledge Graph** and uses the yuzu aroma update.
+11. Generate the direct booking handoff and show the booking summary, dummy link, QR code, and potential direct GMV.
+12. Close by emphasizing that payment is intentionally out of scope; the milestone is AI discovery -> verified quote -> direct booking handoff.
+
+## Local run instructions
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Validate before sharing:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run build
+```
 
-## Learn More
+## Deployment instructions
 
-To learn more about Next.js, take a look at the following resources:
+Recommended deployment target: Vercel.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run build
+vercel
+vercel --prod
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Environment variables are optional:
 
-## Deploy on Vercel
+- `OPENAI_API_KEY` optional stretch only; the current Stage A-C demo works without it.
+- `DEEPGRAM_API_KEY` optional stretch only; voice input is disabled when absent.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The deployed demo must remain useful with no API keys.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Simulated MCP-style endpoints
+
+These endpoints are intentionally stateless and demo-only:
+
+- `GET /api/tools`
+- `POST /api/tools/search_hotels`
+- `POST /api/tools/get_hotel_context`
+- `POST /api/tools/check_availability`
+- `POST /api/tools/create_booking_handoff`
+
+Label used in the app:
+
+“Simulated MCP-style tools — production would expose standards-compliant MCP.”
+
+## Outcome metrics
+
+Primary demo tiles:
+
+- AI Discovery Readiness
+- Freshness Score
+- Direct Booking Handoff Count
+- Incremental Direct GMV Potential
+- Operator Time Saved Estimate
+
+Additional production metrics:
+
+- AI Discovery Share
+- Zero-Click / Agentic Handoff Conversion
+- Direct Revenue Contribution
+- Incremental Direct Booking GMV
+- Operator Time Saved
+- Structured Data Completeness
+- Agent Match Rate
+
+In this demo, AI Discovery Readiness is a proxy metric. In production, this becomes AI Discovery Share: the percentage of monitored traveler-intent prompts where tripla-powered hotel surfaces are cited, accurately described, and linked as direct-bookable sources.
+
+## Strategic roadmap
+
+- Stage 1: Hotel Knowledge Graph Foundation
+- Stage 2: Live & Local Operator Input Layer
+- Stage 3: AI Discoverability & Measurement Layer
+- Stage 4: Agentic Quote & Booking Handoff
+- Stage 5: Operator OaaS Control Layer
+- Stage 6: Traveler-Facing AI Tools
+
+## What this demo deliberately does not do — and why
+
+- No crawler: because crawling is an ingestion method, not the strategic moat.
+- No real PMS/tripla integration: this is a synthetic demo only.
+- No real payment: payment belongs to triplaPay/GMO integration.
+- No real UCP/AP2: protocols are emerging; demo focuses on quote/handoff first.
+- No full guardrail engine: demo uses visible simple guardrails.
+
+This prototype intentionally focuses on the structured data and booking-handoff layer rather than crawling or full autonomous checkout. Crawling is an ingestion method; the strategic moat is the standards-aligned, live, local, operator-approved hotel knowledge graph connected to direct-booking actions.
+
+## Known limitations
+
+- State is in-memory and resets on refresh or Reset Demo.
+- Hotel data is synthetic and intentionally scoped to three deeper properties.
+- Traveler matching is deterministic and intentionally transparent.
+- QR code and booking links are mock handoffs.
+- The demo is not a production MCP server.
+- Voice input is shown as disabled unless implemented as stretch work.
+
+## Design intent
+
+The UI is intentionally closer to a serious B2B SaaS dashboard than a toy chatbot: clean cards, restrained accent color, metric tiles, JSON panels, and professional empty states. The goal is to make the strategic product judgment easy for a CPO/CTO reviewer to see asynchronously.
