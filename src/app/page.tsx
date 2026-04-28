@@ -29,6 +29,7 @@ import type {
 } from "@/lib/types";
 
 type TabId = "console" | "graph" | "agent" | "metrics";
+type TravelerAgentMode = "deterministic" | "llm-grounded";
 
 const tabs: Array<{ id: TabId; label: string; icon: typeof ClipboardCheck }> = [
   { id: "console", label: "Okami-san Live Update Console", icon: ClipboardCheck },
@@ -91,6 +92,8 @@ export default function Home() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [travelerQuery, setTravelerQuery] = useState(travelerQueryExamples[0]);
   const [agentResult, setAgentResult] = useState<TravelerAgentResult | null>(null);
+  const [agentMode, setAgentMode] =
+    useState<TravelerAgentMode>("deterministic");
   const [handoffs, setHandoffs] = useState<BookingHandoff[]>([]);
   const [latestHandoff, setLatestHandoff] = useState<BookingHandoff | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
@@ -153,6 +156,7 @@ export default function Home() {
     setIsExtracting(false);
     setTravelerQuery(travelerQueryExamples[0]);
     setAgentResult(null);
+    setAgentMode("deterministic");
     setHandoffs([]);
     setLatestHandoff(null);
   }
@@ -245,8 +249,52 @@ export default function Home() {
   function handleRunAgent() {
     const result = runTravelerAgent(travelerQuery, hotels);
     setAgentResult(result);
+    setAgentMode("deterministic");
     setSelectedHotelId(result.matchedHotelId);
+    void requestGroundedTravelerAgent(travelerQuery, hotels);
     return result;
+  }
+
+  async function requestGroundedTravelerAgent(
+    querySnapshot: string,
+    hotelsSnapshot: HotelGraph[]
+  ) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8500);
+
+    try {
+      const response = await fetch("/api/traveler-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          query: querySnapshot,
+          hotels: hotelsSnapshot,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Traveler agent failed with ${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        mode?: TravelerAgentMode;
+        result?: TravelerAgentResult;
+      };
+
+      if (payload.result) {
+        setAgentResult(payload.result);
+        setSelectedHotelId(payload.result.matchedHotelId);
+      }
+      setAgentMode(
+        payload.mode === "llm-grounded" ? "llm-grounded" : "deterministic"
+      );
+    } catch (error) {
+      console.log("Traveler agent client fallback:", error);
+      setAgentMode("deterministic");
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }
 
   function handleCreateHandoff(result = agentResult) {
@@ -367,6 +415,7 @@ export default function Home() {
                 travelerQuery={travelerQuery}
                 setTravelerQuery={setTravelerQuery}
                 agentResult={agentResult}
+                agentMode={agentMode}
                 onRunAgent={handleRunAgent}
                 handoff={latestHandoff}
                 onCreateHandoff={handleCreateHandoff}
@@ -589,6 +638,7 @@ function AgentTab({
   travelerQuery,
   setTravelerQuery,
   agentResult,
+  agentMode,
   onRunAgent,
   handoff,
   onCreateHandoff,
@@ -596,6 +646,7 @@ function AgentTab({
   travelerQuery: string;
   setTravelerQuery: (query: string) => void;
   agentResult: TravelerAgentResult | null;
+  agentMode: TravelerAgentMode;
   onRunAgent: () => TravelerAgentResult;
   handoff: BookingHandoff | null;
   onCreateHandoff: () => BookingHandoff | null;
@@ -631,6 +682,11 @@ function AgentTab({
         >
           Run traveler query
         </button>
+        <div className="mt-4 inline-flex items-center rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-600">
+          {agentMode === "llm-grounded"
+            ? "LLM-grounded mode"
+            : "Deterministic mode"}
+        </div>
       </Panel>
       {agentResult ? (
         <Panel
@@ -638,6 +694,22 @@ function AgentTab({
           title={`Matched hotel: ${agentResult.hotelName}`}
           description="Source: Hotel Knowledge Graph"
         >
+          {agentResult.assistantMessage ? (
+            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <h3 className="text-sm font-semibold text-blue-950">
+                Grounded traveler response
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-blue-800">
+                {agentResult.assistantMessage}
+              </p>
+              {agentResult.missingInformation?.length ? (
+                <div className="mt-3 text-sm leading-6 text-blue-800">
+                  <span className="font-medium">Missing information: </span>
+                  {agentResult.missingInformation.join(", ")}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
               <h3 className="text-sm font-semibold text-zinc-950">Matching criteria</h3>

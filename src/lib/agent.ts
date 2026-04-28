@@ -14,6 +14,8 @@ export interface TravelerAgentResult {
   policyNotes: string[];
   directBookingRationale: string;
   source: "Hotel Knowledge Graph";
+  assistantMessage?: string;
+  missingInformation?: string[];
 }
 
 function scoreHotel(query: string, hotel: HotelGraph) {

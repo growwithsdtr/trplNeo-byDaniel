@@ -42,6 +42,7 @@ If AI agents become a major travel discovery layer, hotels risk being represente
 - Human approval flow before publishing updates.
 - In-memory hotel graph mutation.
 - Traveler AI agent simulation that reads only from the current graph.
+- Optional LLM-grounded traveler response when `OPENAI_API_KEY` is configured, with deterministic fallback as the default.
 - Direct booking handoff with dummy booking link and QR code.
 - Metrics that improve after approved updates and booking handoffs.
 - Schema.org JSON-LD preview with copy button and validator link.
@@ -106,6 +107,14 @@ Environment variables are optional:
 
 The deployed demo must remain useful with no API keys.
 
+Copy the example environment file when testing API-backed behavior locally:
+
+```bash
+cp .env.local.example .env.local
+```
+
+Leave `OPENAI_API_KEY` blank to keep deterministic fallback behavior. `.env.local` is gitignored and should never contain committed secrets.
+
 ## Simulated MCP-style endpoints
 
 These endpoints are intentionally stateless and demo-only:
@@ -115,10 +124,13 @@ These endpoints are intentionally stateless and demo-only:
 - `POST /api/tools/get_hotel_context`
 - `POST /api/tools/check_availability`
 - `POST /api/tools/create_booking_handoff`
+- `POST /api/traveler-agent`
 
 Label used in the app:
 
 “Simulated MCP-style tools — production would expose standards-compliant MCP.”
+
+`/api/traveler-agent` is not MCP. It is a server-side route that can use OpenAI for a grounded traveler-facing response when configured. The route receives the traveler query and current in-session Hotel Knowledge Graph, instructs the model to answer only from provided graph facts, and falls back silently to the deterministic traveler agent on missing key, timeout, network error, invalid response, or rate limit.
 
 ## Outcome metrics
 
@@ -166,6 +178,7 @@ This prototype intentionally focuses on the structured data and booking-handoff 
 - State is in-memory and resets on refresh or Reset Demo.
 - Hotel data is synthetic and intentionally scoped to three deeper properties.
 - Traveler matching is deterministic and intentionally transparent.
+- LLM-grounded traveler mode is optional; deterministic mode remains the default when no OpenAI key is configured.
 - QR code and booking links are mock handoffs.
 - The demo is not a production MCP server.
 - Voice input is shown as disabled unless implemented as stretch work.
