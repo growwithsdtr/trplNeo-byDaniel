@@ -411,6 +411,10 @@ export const updateExamples = [
     text: "Guests booking the kaiseki plan tomorrow will receive local strawberry dessert.",
   },
   {
+    label: "Local event",
+    text: "At 7pm we will have free shamizen concert in the washitsu room, please book by 6:30",
+  },
+  {
     label: "Guest insight",
     text: "Many Korean guests ask about vegetarian breakfast; mark vegetarian breakfast as available with advance notice.",
   },

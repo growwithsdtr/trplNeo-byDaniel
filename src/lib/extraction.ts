@@ -1,9 +1,24 @@
 import type { HotelGraph, LiveLocalUpdate, RiskLevel, UpdateCategory } from "@/lib/types";
-
-const DEMO_NOW = "2026-04-28T12:00:00+09:00";
+import { DEMO_DATE_CONTEXT, DEMO_NOW, DEMO_TOMORROW, DEMO_WEEKEND } from "@/lib/demo-date";
 
 function hasAny(text: string, terms: string[]) {
   return terms.some((term) => text.includes(term));
+}
+
+function isReputationSensitive(text: string) {
+  return hasAny(text, [
+    "vomit",
+    "vomited",
+    "drunk",
+    "incident",
+    "cleanliness",
+    "dirty",
+    "unsafe",
+  ]);
+}
+
+function isShamisenEvent(text: string) {
+  return hasAny(text, ["shamisen", "samizen", "shamizen", "concert"]);
 }
 
 function riskForText(text: string): { riskLevel: RiskLevel; requiresApproval: boolean } {
@@ -20,6 +35,10 @@ function riskForText(text: string): { riskLevel: RiskLevel; requiresApproval: bo
     "cleanliness",
     "safe",
     "safety",
+    "vomit",
+    "vomited",
+    "drunk",
+    "incident",
   ];
   const highRisk = hasAny(text, highRiskTerms);
 
@@ -30,11 +49,13 @@ function riskForText(text: string): { riskLevel: RiskLevel; requiresApproval: bo
 }
 
 function categoryForText(text: string): UpdateCategory {
+  if (isReputationSensitive(text)) return "reputation_sensitive";
+  if (isShamisenEvent(text)) return "local_event";
   if (hasAny(text, ["onsen", "bath", "sauna", "yuzu"])) return "onsen_update";
   if (hasAny(text, ["kaiseki", "breakfast", "vegetarian", "dessert", "meal"])) {
     return "meal_plan";
   }
-  if (hasAny(text, ["late checkout", "discount", "free"])) return "promotion";
+  if (hasAny(text, ["late checkout", "discount", "direct-only offer"])) return "promotion";
   if (hasAny(text, ["maintenance", "closure", "closed"])) return "maintenance";
   if (hasAny(text, ["dog", "pet"])) return "pet_policy";
   if (hasAny(text, ["wi-fi", "wifi", "hdmi", "speed"])) return "room_tech";
@@ -68,13 +89,13 @@ function affectedRoomTypes(text: string, hotel: HotelGraph) {
 }
 
 function affectedDates(text: string) {
-  if (text.includes("tomorrow")) return ["2026-04-29"];
+  if (text.includes("tomorrow")) return [DEMO_TOMORROW];
   if (text.includes("weekend") || text.includes("saturday")) {
-    return ["2026-05-02", "2026-05-03"];
+    return [DEMO_WEEKEND.checkInDate, DEMO_WEEKEND.checkOutDate];
   }
-  if (text.includes("wednesday")) return ["2026-04-29"];
-  if (text.includes("today")) return ["2026-04-28"];
-  return ["2026-05-02"];
+  if (text.includes("wednesday")) return [DEMO_TOMORROW];
+  if (text.includes("today")) return [DEMO_DATE_CONTEXT];
+  return [DEMO_WEEKEND.checkInDate];
 }
 
 function titleForCategory(category: UpdateCategory) {
@@ -92,6 +113,7 @@ function titleForCategory(category: UpdateCategory) {
     guest_insight: "Guest insight",
     crm_insight: "CRM segment insight",
     bot_insight: "Bot question insight",
+    reputation_sensitive: "Reputation-sensitive cleanliness incident",
   };
   return titles[category];
 }
@@ -99,6 +121,37 @@ function titleForCategory(category: UpdateCategory) {
 function travelerSummary(input: string) {
   const sentence = input.trim().replace(/\s+/g, " ");
   return sentence.endsWith(".") ? sentence : `${sentence}.`;
+}
+
+function parseClockTime(text: string, term: "event" | "deadline") {
+  const pattern =
+    term === "event"
+      ? /\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/
+      : /\b(?:by|book by|please book by)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/;
+  const match = text.match(pattern);
+  if (!match) return undefined;
+
+  let hour = Number(match[1]);
+  const minute = match[2] ?? "00";
+  const suffix = match[3];
+  if (suffix === "pm" && hour < 12) hour += 12;
+  if (suffix === "am" && hour === 12) hour = 0;
+  if (term === "deadline" && !suffix && hour < 12) {
+    hour += 12;
+  }
+
+  return `${hour.toString().padStart(2, "0")}:${minute}`;
+}
+
+function normalizedShamisenSummary(input: string) {
+  const eventTime = parseClockTime(input.toLowerCase(), "event") ?? "19:00";
+  const bookingDeadline =
+    parseClockTime(input.toLowerCase(), "deadline") ?? "18:30";
+  return {
+    eventTime,
+    bookingDeadline,
+    summary: `A free shamisen concert will be held in the washitsu room at ${eventTime}. Please book by ${bookingDeadline}.`,
+  };
 }
 
 function japanesePreview(category: UpdateCategory) {
@@ -116,6 +169,7 @@ function japanesePreview(category: UpdateCategory) {
     guest_insight: "ゲスト傾向: よくある質問に基づく情報が追加されました。",
     crm_insight: "CRM傾向: セグメント別の関心事項が追加されました。",
     bot_insight: "Bot傾向: 問い合わせ傾向に基づく情報が追加されました。",
+    reputation_sensitive: "重要: ロビー清掃対応中です。ご不便をおかけします。",
   };
   return previews[category];
 }
@@ -127,26 +181,41 @@ export function deterministicExtractUpdate(
   const normalized = input.toLowerCase();
   const category = categoryForText(normalized);
   const risk = riskForText(normalized);
-  const summary = travelerSummary(input);
+  const isSensitive = category === "reputation_sensitive";
+  const shamisenEvent = category === "local_event" && isShamisenEvent(normalized);
+  const event = shamisenEvent ? normalizedShamisenSummary(input) : null;
+  const summary = isSensitive
+    ? "Lobby cleaning is currently in progress. We apologize for any temporary inconvenience."
+    : event?.summary ?? travelerSummary(input.replace(/samizen|shamizen/gi, "shamisen"));
+  const internalNotes = isSensitive
+    ? "Reported vomit incident in lobby; cleaning response needed."
+    : "Deterministic demo extraction. Production would route high-risk items through policy and approval controls.";
+  const extractedDates =
+    shamisenEvent && !hasAny(normalized, ["tomorrow", "weekend", "saturday", "wednesday"])
+      ? [DEMO_DATE_CONTEXT]
+      : affectedDates(normalized);
 
   return {
     id: `update-${hotel.id}-${Date.now()}`,
     category,
-    title: titleForCategory(category),
+    title: shamisenEvent ? "Shamisen concert" : titleForCategory(category),
     hotelId: hotel.id,
-    affectedDates: affectedDates(normalized),
+    affectedDates: extractedDates,
     affectedRoomTypes: affectedRoomTypes(normalized, hotel),
     affectedOffer: normalized.includes("kaiseki")
       ? "Seasonal Kaiseki Direct Plan"
       : normalized.includes("cycling")
         ? "Lake Cycling Direct Plan"
         : undefined,
+    eventTime: event?.eventTime,
+    bookingDeadline: event?.bookingDeadline,
+    reputationSensitive: isSensitive,
+    sanitizedTravelerCopy: isSensitive,
     priceImpact: normalized.includes("¥") || normalized.includes("price")
       ? "Price or fee mentioned; verify before publishing."
       : "No room-rate change detected.",
     travelerFacingSummary: summary,
-    internalNotes:
-      "Deterministic demo extraction. Production would route high-risk items through policy and approval controls.",
+    internalNotes,
     languagesToGenerate: ["ja", "en", "ko", "zh-TW"],
     preview: {
       ja: japanesePreview(category),

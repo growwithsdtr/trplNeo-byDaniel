@@ -18,7 +18,14 @@ import { JsonViewer } from "@/components/json-viewer";
 import { MetricsTiles } from "@/components/metrics-tiles";
 import { baselineHotels, travelerQueryExamples, updateExamples } from "@/data/hotels";
 import { runTravelerAgent, type TravelerAgentResult } from "@/lib/agent";
+import {
+  DEMO_APPROVED_AT,
+  DEMO_DATE_CONTEXT,
+  DEMO_HANDOFF_AT,
+  DEMO_NOW,
+} from "@/lib/demo-date";
 import { deterministicExtractUpdate } from "@/lib/extraction";
+import { parseTravelerIntent } from "@/lib/intent";
 import { calculateMetrics } from "@/lib/metrics";
 import { buildHotelJsonLd } from "@/lib/schema";
 import type {
@@ -32,7 +39,11 @@ type TabId = "console" | "graph" | "agent" | "metrics";
 type TravelerAgentMode = "deterministic" | "llm-grounded";
 
 const tabs: Array<{ id: TabId; label: string; icon: typeof ClipboardCheck }> = [
-  { id: "console", label: "Okami-san Live Update Console", icon: ClipboardCheck },
+  {
+    id: "console",
+    label: "Hotel Operator Live & Local Update Console",
+    icon: ClipboardCheck,
+  },
   { id: "graph", label: "Live & Local Hotel Knowledge Graph", icon: Database },
   { id: "metrics", label: "Metrics & AI Discoverability Audit", icon: BadgeCheck },
   { id: "agent", label: "Traveler AI Agent Simulation", icon: Bot },
@@ -46,7 +57,7 @@ const tourSteps: TourStep[] = [
   },
   {
     title: "Add a live/local operator update",
-    body: "The operator console is where hotel staff will add time-sensitive information without a complex dashboard.",
+    body: "The hotel operator and Okami-san（女将） console is where hotel staff will add time-sensitive information without a complex dashboard.",
     tab: "console",
   },
   {
@@ -85,9 +96,16 @@ interface BookingIntent {
   checkInDate: string;
   checkOutDate: string;
   guests: number;
+  adults: number;
+  children: number;
+  pets: number;
   roomType: string;
   hotelName: string;
-  estimatedRateYen: number;
+  estimatedRateYen?: number;
+  availabilityVerified: boolean;
+  availabilityNote: string;
+  rateNote: string;
+  handoffType: "verified_booking_handoff" | "booking_inquiry_handoff";
   liveLocalUpdateUsed: string;
 }
 
@@ -99,50 +117,36 @@ function findHotelById(hotels: HotelGraph[], hotelId: string) {
   return hotels.find((hotel) => hotel.id === hotelId) ?? hotels[0];
 }
 
-function parseGuests(query: string) {
-  const normalized = query.toLowerCase();
-  if (
-    normalized.includes("wife and i") ||
-    normalized.includes("husband and i") ||
-    normalized.includes("partner and i") ||
-    normalized.includes("two people") ||
-    normalized.includes("two guests") ||
-    normalized.includes("2 people") ||
-    normalized.includes("2 guests")
-  ) {
-    return 2;
-  }
-  if (
-    normalized.includes("solo") ||
-    normalized.includes("alone") ||
-    normalized.includes("one person") ||
-    normalized.includes("1 guest")
-  ) {
-    return 1;
-  }
-  return 2;
-}
-
-function parseDemoDates(query: string) {
-  const normalized = query.toLowerCase();
-  if (normalized.includes("tomorrow")) {
-    return { checkInDate: "2026-04-29", checkOutDate: "2026-04-30" };
-  }
-  return { checkInDate: "2026-05-02", checkOutDate: "2026-05-03" };
-}
-
 function buildBookingIntent(
   query: string,
-  result: TravelerAgentResult
+  result: TravelerAgentResult,
+  hotels: HotelGraph[]
 ): BookingIntent {
-  const dates = parseDemoDates(query);
+  const parsed = parseTravelerIntent(query);
+  const matchedHotel = findHotelById(hotels, result.matchedHotelId);
+  const matchedRoom =
+    matchedHotel.roomTypes.find((room) => room.name === result.availableRoom.roomType) ??
+    matchedHotel.roomTypes[0];
+  const requestedAvailability = matchedRoom.availability.find(
+    (slot) => slot.date === parsed.checkInDate
+  );
+  const availabilityVerified = Boolean(requestedAvailability?.available);
 
   return {
-    ...dates,
-    guests: parseGuests(query),
-    roomType: result.availableRoom.roomType,
+    ...parsed,
+    roomType: matchedRoom.name,
     hotelName: result.hotelName,
-    estimatedRateYen: result.rateYen,
+    estimatedRateYen: availabilityVerified ? matchedRoom.rateYen : undefined,
+    availabilityVerified,
+    availabilityNote: availabilityVerified
+      ? `${matchedRoom.name} has ${requestedAvailability?.remaining ?? 0} room(s) left on ${parsed.checkInDate}.`
+      : "Availability for requested dates is not verified in the mock graph.",
+    rateNote: availabilityVerified
+      ? `Verified mock graph rate: ¥${matchedRoom.rateYen.toLocaleString()}.`
+      : "Rate unavailable in mock graph for requested dates.",
+    handoffType: availabilityVerified
+      ? "verified_booking_handoff"
+      : "booking_inquiry_handoff",
     liveLocalUpdateUsed:
       result.latestUpdatesUsed[0]?.travelerFacingSummary ??
       "No query-relevant live/local update used.",
@@ -177,12 +181,8 @@ export default function Home() {
   );
 
   const metrics = useMemo(
-    () =>
-      calculateMetrics(
-        [selectedHotel],
-        handoffs.filter((handoff) => handoff.hotelId === selectedHotel.id)
-      ),
-    [selectedHotel, handoffs]
+    () => calculateMetrics(hotels, handoffs),
+    [hotels, handoffs]
   );
   const jsonLd = useMemo(() => buildHotelJsonLd(selectedHotel), [selectedHotel]);
 
@@ -326,8 +326,8 @@ export default function Home() {
     const approvedUpdate: LiveLocalUpdate = {
       ...update,
       status: "approved",
-      approvedAt: "2026-04-28T12:03:00+09:00",
-      lastVerifiedAt: "2026-04-28T12:03:00+09:00",
+      approvedAt: DEMO_APPROVED_AT,
+      lastVerifiedAt: DEMO_APPROVED_AT,
     };
 
     setHotels((currentHotels) =>
@@ -377,15 +377,14 @@ export default function Home() {
   }
 
   function handleRunAgent() {
-    const currentHotel = findHotelById(hotels, selectedHotelId);
-    const result = runTravelerAgent(travelerQuery, [currentHotel]);
+    const result = runTravelerAgent(travelerQuery, hotels);
     setAgentResult(result);
     setAgentMode("deterministic");
     setLatestHandoff(null);
     setHandoffStatus("idle");
     const requestId = agentRequestId.current + 1;
     agentRequestId.current = requestId;
-    void requestGroundedTravelerAgent(travelerQuery, [currentHotel], requestId);
+    void requestGroundedTravelerAgent(travelerQuery, hotels, requestId);
     return result;
   }
 
@@ -438,7 +437,7 @@ export default function Home() {
 
   function handleCreateHandoff(result = agentResult) {
     if (!result) return null;
-    const intent = buildBookingIntent(travelerQuery, result);
+    const intent = buildBookingIntent(travelerQuery, result, hotels);
     const handoff: BookingHandoff = {
       id: `handoff-${Date.now()}`,
       hotelId: result.matchedHotelId,
@@ -448,12 +447,18 @@ export default function Home() {
       checkInDate: intent.checkInDate,
       checkOutDate: intent.checkOutDate,
       guests: intent.guests,
-      rateYen: result.rateYen,
+      adults: intent.adults,
+      children: intent.children,
+      pets: intent.pets,
+      rateYen: intent.estimatedRateYen,
+      handoffType: intent.handoffType,
+      availabilityVerified: intent.availabilityVerified,
+      rateNote: intent.rateNote,
       liveLocalUpdateUsed: intent.liveLocalUpdateUsed,
       bookingUrl: `https://example.com/triplaNeoByDaniel/book/${result.matchedHotelId}?room=${encodeURIComponent(
         intent.roomType
-      )}&checkIn=${intent.checkInDate}&checkOut=${intent.checkOutDate}&guests=${intent.guests}`,
-      createdAt: "2026-04-28T12:06:00+09:00",
+      )}&checkIn=${intent.checkInDate}&checkOut=${intent.checkOutDate}&adults=${intent.adults}&children=${intent.children}&pets=${intent.pets}`,
+      createdAt: DEMO_HANDOFF_AT,
     };
     setHandoffs((current) => [handoff, ...current]);
     setLatestHandoff(handoff);
@@ -559,7 +564,7 @@ export default function Home() {
             ) : null}
             {activeTab === "agent" ? (
               <AgentTab
-                selectedHotelName={selectedHotel.name}
+                hotels={hotels}
                 travelerQuery={travelerQuery}
                 setTravelerQuery={setTravelerQuery}
                 agentResult={agentResult}
@@ -571,14 +576,17 @@ export default function Home() {
               />
             ) : null}
             {activeTab === "metrics" ? (
-              <MetricsTab metrics={metrics} selectedHotelName={selectedHotel.name} />
+              <MetricsTab metrics={metrics} />
             ) : null}
           </section>
         </section>
 
         <footer className="flex flex-col gap-2 border-t border-zinc-200 py-4 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
           <p>Demo by Daniel Jimenez · Synthetic data · Senior PM Gen AI take-home prototype</p>
-          <p>Payment execution, PMS integration, crawling, and production MCP are intentionally out of scope.</p>
+          <p>
+            Demo date context: {DEMO_DATE_CONTEXT} · Payment execution, PMS
+            integration, crawling, and production MCP are intentionally out of scope.
+          </p>
         </footer>
       </div>
 
@@ -627,15 +635,24 @@ function ConsoleTab({
   return (
     <div className="grid gap-4">
       <Panel
-        eyebrow="Operator AI control layer"
-        title="Okami-san Live Update Console"
-        description="Hotel staff add live, local, time-sensitive information. The demo extracts structured fields, flags risk, and requires approval before publishing."
+        eyebrow="Hotel Operator & Okami-san（女将）"
+        title="Hotel Operator Live & Local Update Console"
+        description="This is where hotel staff add fresh information that OTAs and stale crawlers usually miss."
       >
         <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
           Current hotel context: {selectedHotel.name}
         </div>
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
           <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-950">
+                Set Live & Local Updates
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-zinc-600">
+                This is where hotel staff add fresh information that OTAs and
+                stale crawlers usually miss.
+              </p>
+            </div>
             <HotelSelector
               hotels={hotels}
               selectedHotelId={selectedHotelId}
@@ -707,7 +724,7 @@ function ConsoleTab({
       </Panel>
       <Guardrails />
       <Panel
-        eyebrow="Current hotel context"
+        eyebrow="Selected hotel facts"
         title={selectedHotel.name}
         description={selectedHotel.shortDescription}
       >
@@ -807,7 +824,7 @@ function KnowledgeGraphTab({
 }
 
 function AgentTab({
-  selectedHotelName,
+  hotels,
   travelerQuery,
   setTravelerQuery,
   agentResult,
@@ -817,7 +834,7 @@ function AgentTab({
   handoffStatus,
   onCreateHandoff,
 }: {
-  selectedHotelName: string;
+  hotels: HotelGraph[];
   travelerQuery: string;
   setTravelerQuery: (query: string) => void;
   agentResult: TravelerAgentResult | null;
@@ -829,7 +846,7 @@ function AgentTab({
 }) {
   const handoffRef = useRef<HTMLDivElement>(null);
   const bookingIntent = agentResult
-    ? buildBookingIntent(travelerQuery, agentResult)
+    ? buildBookingIntent(travelerQuery, agentResult, hotels)
     : null;
 
   useEffect(() => {
@@ -846,10 +863,11 @@ function AgentTab({
       <Panel
         eyebrow="Traveler-facing AI"
         title="Traveler AI Agent Simulation"
-        description="The simulated agent reads only from the current structured Hotel Knowledge Graph. It must not invent prices, availability, amenities, policies, or activities."
+        description="The simulated agent searches across all 3 hotel knowledge graphs by default. It must not invent prices, availability, amenities, policies, or activities."
       >
         <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
-          Current hotel context: {selectedHotelName}
+          Search scope: all 3 hotel knowledge graphs. Booking handoff follows the
+          agent-selected hotel, not the operator-selected hotel.
         </div>
         <textarea
           value={travelerQuery}
@@ -887,6 +905,14 @@ function AgentTab({
           title={`Matched hotel: ${agentResult.hotelName}`}
           description="Source: Hotel Knowledge Graph"
         >
+          <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+            <h3 className="text-sm font-semibold text-zinc-950">
+              Why this hotel was selected
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">
+              {agentResult.selectionReason}
+            </p>
+          </div>
           {agentResult.assistantMessage ? (
             <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
               <h3 className="text-sm font-semibold text-blue-950">
@@ -915,11 +941,16 @@ function AgentTab({
             </div>
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
               <h3 className="text-sm font-semibold text-zinc-950">Verified room and rate</h3>
-              <p className="mt-2 text-sm leading-6 text-zinc-600">
-                {agentResult.availableRoom.roomType} on {agentResult.availableRoom.date}
-                : {agentResult.availableRoom.remaining} left at ¥
-                {agentResult.rateYen.toLocaleString()}.
-              </p>
+              {bookingIntent?.availabilityVerified ? (
+                <p className="mt-2 text-sm leading-6 text-zinc-600">
+                  {bookingIntent.availabilityNote} {bookingIntent.rateNote}
+                </p>
+              ) : (
+                <div className="mt-2 space-y-1.5 text-sm leading-6 text-zinc-600">
+                  <p>Availability for requested dates is not verified in the mock graph.</p>
+                  <p>Rate unavailable in mock graph for requested dates.</p>
+                </div>
+              )}
             </div>
           </div>
           <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-4">
@@ -962,8 +993,12 @@ function AgentTab({
             className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
           >
             {handoffStatus === "created"
-              ? "Booking handoff created"
-              : "Generate direct booking handoff"}
+              ? handoff?.handoffType === "booking_inquiry_handoff"
+                ? "Booking inquiry handoff created"
+                : "Booking handoff created"
+              : bookingIntent?.availabilityVerified === false
+                ? "Generate booking inquiry handoff"
+                : "Generate direct booking handoff"}
           </button>
         </Panel>
       ) : (
@@ -986,19 +1021,14 @@ function AgentTab({
   );
 }
 
-function MetricsTab({
-  metrics,
-  selectedHotelName,
-}: {
-  metrics: ReturnType<typeof calculateMetrics>;
-  selectedHotelName: string;
-}) {
+function MetricsTab({ metrics }: { metrics: ReturnType<typeof calculateMetrics> }) {
   return (
     <div className="grid gap-4">
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
-        Current hotel context: {selectedHotelName}
+        Audit scope: all 3 hotel knowledge graphs in this single-session demo.
       </div>
       <MetricsTiles metrics={metrics} />
+      <RecommendedNextActions />
       <Panel
         eyebrow="Outcome proxy"
         title="AI Discovery Share definition"
@@ -1064,12 +1094,21 @@ function StructuredUpdateCard({
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <Fact label="Category" value={update.category} />
         <Fact label="Affected dates" value={update.affectedDates.join(", ")} />
+        {update.eventTime ? <Fact label="Event time" value={update.eventTime} /> : null}
+        {update.bookingDeadline ? (
+          <Fact label="Booking deadline" value={update.bookingDeadline} />
+        ) : null}
         <Fact
           label="Affected rooms"
           value={update.affectedRoomTypes.join(", ") || "No room-specific impact"}
         />
         <Fact label="Price impact" value={update.priceImpact} />
       </div>
+      {update.sanitizedTravelerCopy ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-900">
+          Reputation-sensitive update: traveler-facing copy sanitized.
+        </div>
+      ) : null}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
@@ -1166,18 +1205,27 @@ function BookingIntentCard({ intent }: { intent: BookingIntent }) {
           </p>
         </div>
         <span className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
-          {intent.guests} guests
+          {intent.guests} guests · {intent.pets} pets
         </span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <Fact label="Selected hotel" value={intent.hotelName} />
         <Fact label="Check-in" value={intent.checkInDate} />
         <Fact label="Check-out" value={intent.checkOutDate} />
+        <Fact
+          label="Party"
+          value={`${intent.adults} adults, ${intent.children} children, ${intent.pets} pets`}
+        />
         <Fact label="Room type" value={intent.roomType} />
         <Fact
           label="Estimated rate"
-          value={`¥${intent.estimatedRateYen.toLocaleString()}`}
+          value={
+            intent.estimatedRateYen
+              ? `¥${intent.estimatedRateYen.toLocaleString()}`
+              : "Rate unavailable in mock graph for requested dates."
+          }
         />
+        <Fact label="Availability" value={intent.availabilityNote} />
         <Fact label="Live/local update used" value={intent.liveLocalUpdateUsed} />
       </div>
     </div>
@@ -1185,11 +1233,17 @@ function BookingIntentCard({ intent }: { intent: BookingIntent }) {
 }
 
 function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
+  const isInquiry = handoff.handoffType === "booking_inquiry_handoff";
+
   return (
     <Panel
-      eyebrow="Mock direct booking handoff created"
+      eyebrow={isInquiry ? "Booking inquiry handoff created" : "Mock direct booking handoff created"}
       title={handoff.hotelName}
-      description="Payment integration is intentionally out of scope. The first milestone is proving AI discovery → verified quote → direct booking handoff."
+      description={
+        isInquiry
+          ? "The requested date is outside verified mock availability, so the demo creates an inquiry handoff without inventing rate or availability."
+          : "Payment integration is intentionally out of scope. The first milestone is proving AI discovery → verified quote → direct booking handoff."
+      }
     >
       <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -1199,10 +1253,25 @@ function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
           <Fact label="Room" value={handoff.roomType} />
           <Fact label="Check-in" value={handoff.checkInDate} />
           <Fact label="Check-out" value={handoff.checkOutDate} />
-          <Fact label="Guests" value={handoff.guests.toString()} />
+          <Fact
+            label="Guests"
+            value={`${handoff.guests} total · ${handoff.adults ?? handoff.guests} adults · ${handoff.children ?? 0} children · ${handoff.pets ?? 0} pets`}
+          />
           <Fact
             label="Potential direct GMV"
-            value={`¥${handoff.rateYen.toLocaleString()}`}
+            value={
+              handoff.rateYen
+                ? `¥${handoff.rateYen.toLocaleString()}`
+                : "Rate unavailable in mock graph for requested dates."
+            }
+          />
+          <Fact
+            label="Availability status"
+            value={
+              handoff.availabilityVerified
+                ? "Verified in mock graph"
+                : "Availability for requested dates is not verified in the mock graph."
+            }
           />
           <Fact
             label="Live/local update used"
@@ -1229,6 +1298,54 @@ function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
   );
 }
 
+function RecommendedNextActions() {
+  const actions = [
+    {
+      metric: "AI Discovery Readiness",
+      action:
+        "Add missing room policies, pet policy, multilingual summaries, and live/local updates.",
+    },
+    {
+      metric: "Freshness Score",
+      action:
+        "Ask operator to verify today’s bath schedule, meal availability, and local events.",
+    },
+    {
+      metric: "Direct Booking Handoff Count",
+      action: "Test traveler prompts and ensure each hotel has bookable offers.",
+    },
+    {
+      metric: "Incremental Direct GMV",
+      action: "Add direct-only packages, upgrades, and seasonal offers.",
+    },
+    {
+      metric: "Operator Time Saved",
+      action:
+        "Convert frequent bot questions into reusable structured answers.",
+    },
+  ];
+
+  return (
+    <Panel
+      eyebrow="Reviewer clarity"
+      title="Recommended next actions"
+      description="Each metric points to a concrete product lever rather than a vanity AI feature."
+    >
+      <div className="grid gap-3 md:grid-cols-2">
+        {actions.map((item) => (
+          <div
+            key={item.metric}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-4"
+          >
+            <p className="text-sm font-semibold text-zinc-950">{item.metric}</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">{item.action}</p>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function McpToolsPanel() {
   const tools = [
     {
@@ -1236,34 +1353,91 @@ function McpToolsPanel() {
       method: "POST",
       path: "/api/tools/search_hotels",
       description: "Search synthetic hotels by traveler intent, dates, and guests.",
+      request: {
+        query: "business hotel with fast Wi-Fi, HDMI, workspace, and breakfast",
+        dates: ["2026-05-02"],
+        guests: 2,
+      },
     },
     {
       name: "get_hotel_context",
       method: "POST",
       path: "/api/tools/get_hotel_context",
       description: "Return structured hotel context for AI-readable discovery.",
+      request: { hotelId: "nikko-cedar-ryokan" },
     },
     {
       name: "check_availability",
       method: "POST",
       path: "/api/tools/check_availability",
       description: "Return only mock availability and prices present in JSON.",
+      request: {
+        hotelId: "nikko-station-business-hotel",
+        roomType: "Work Twin",
+        dates: ["2026-05-02"],
+      },
     },
     {
       name: "create_booking_handoff",
       method: "POST",
       path: "/api/tools/create_booking_handoff",
       description: "Create a simulated direct booking link without payment execution.",
+      request: {
+        hotelId: "lake-chuzenji-activity-lodge",
+        roomType: "Lake Family Room",
+        dates: ["2026-05-02"],
+        guestInfo: { adults: 2, children: 2, pets: 1 },
+      },
     },
   ];
+  const [toolRun, setToolRun] = useState<{
+    name: string;
+    request: Record<string, unknown>;
+    response: unknown;
+    status: "idle" | "running" | "complete";
+  } | null>(null);
+
+  async function runTool(tool: (typeof tools)[number]) {
+    const request = tool.request;
+    setToolRun({
+      name: tool.name,
+      request,
+      response: { status: "running" },
+      status: "running",
+    });
+
+    try {
+      const response = await fetch(tool.path, {
+        method: tool.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      setToolRun({
+        name: tool.name,
+        request,
+        response: await response.json(),
+        status: "complete",
+      });
+    } catch (error) {
+      setToolRun({
+        name: tool.name,
+        request,
+        response: {
+          error: "tool_call_failed",
+          detail: error instanceof Error ? error.message : "Unknown error",
+        },
+        status: "complete",
+      });
+    }
+  }
 
   return (
     <Panel
       eyebrow="Tool/API thinking"
-      title="Simulated MCP-style tools"
-      description="Simulated MCP-style tools — production would expose standards-compliant MCP."
+      title="Agent Tool Layer Simulation"
+      description="These demo API routes simulate the tools an AI agent would call. In production they would become standards-compliant MCP/UCP adapters."
     >
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {tools.map((tool) => (
           <div
             key={tool.name}
@@ -1283,9 +1457,36 @@ function McpToolsPanel() {
             <p className="mt-3 break-all font-mono text-xs text-blue-700">
               {tool.path}
             </p>
+            <button
+              type="button"
+              onClick={() => runTool(tool)}
+              className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-zinc-950 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+            >
+              Run {tool.name}
+            </button>
           </div>
         ))}
       </div>
+      {toolRun ? (
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <JsonViewer
+            title={`Request JSON · ${toolRun.name}`}
+            value={toolRun.request}
+          />
+          <JsonViewer
+            title={
+              toolRun.status === "running"
+                ? "Response JSON · running"
+                : `Response JSON · ${toolRun.name}`
+            }
+            value={toolRun.response}
+          />
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm leading-6 text-zinc-600">
+          Click a tool button to see the exact request JSON and mock response JSON.
+        </div>
+      )}
     </Panel>
   );
 }
@@ -1318,7 +1519,34 @@ function Panel({
 }
 
 function GraphCards({ hotel }: { hotel: HotelGraph }) {
+  const isSessionUpdate = (update: LiveLocalUpdate) =>
+    update.createdAt === DEMO_NOW || update.approvedAt === DEMO_APPROVED_AT;
+  const liveUpdateItems = hotel.liveLocalUpdates.map((update) => {
+    const sessionLabel = isSessionUpdate(update) ? " · New in this session" : "";
+    const timing = update.eventTime ? ` · ${update.eventTime}` : "";
+    const deadline = update.bookingDeadline
+      ? ` · book by ${update.bookingDeadline}`
+      : "";
+    return `${update.title}: ${update.travelerFacingSummary}${timing}${deadline}${sessionLabel}`;
+  });
+  const sessionUpdateItems = hotel.liveLocalUpdates
+    .filter(isSessionUpdate)
+    .map(
+      (update) =>
+        `${update.title}: ${update.travelerFacingSummary} · New in this session`
+    );
   const sections = [
+    [
+      "Live & Local Updates",
+      liveUpdateItems.length ? liveUpdateItems : ["No live/local updates yet"],
+    ],
+    ["Promotions", hotel.promotions],
+    ["Maintenance Notices", hotel.maintenanceNotices],
+    [
+      "Recently Changed Fields / Session Updates",
+      sessionUpdateItems.length ? sessionUpdateItems : ["No session updates yet"],
+    ],
+    ["Hotel identity", [`${hotel.name} · ${hotel.type} · ${hotel.location}`]],
     ["Rooms", hotel.roomTypes.map((room) => `${room.name}: ${room.capacity}`)],
     ["Rates", hotel.roomTypes.map((room) => `${room.name}: ¥${room.rateYen.toLocaleString()}`)],
     [
@@ -1339,12 +1567,6 @@ function GraphCards({ hotel }: { hotel: HotelGraph }) {
     ["Business amenities", hotel.businessTravelerAmenities],
     ["Room tech amenities", hotel.roomTechAmenities],
     [
-      "Live local updates",
-      hotel.liveLocalUpdates.map((update) => update.travelerFacingSummary),
-    ],
-    ["Promotions", hotel.promotions],
-    ["Maintenance notices", hotel.maintenanceNotices],
-    [
       "Traveler / CRM / Bot insights",
       [
         ...hotel.verifiedGuestInsights,
@@ -1361,7 +1583,18 @@ function GraphCards({ hotel }: { hotel: HotelGraph }) {
           <h3 className="text-sm font-semibold text-zinc-950">{title as string}</h3>
           <ul className="mt-2 space-y-1.5 text-sm leading-6 text-zinc-600">
             {(items as string[]).map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item}>
+                {item.includes("New in this session") ? (
+                  <>
+                    {item.replace(" · New in this session", "")}{" "}
+                    <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200">
+                      New in this session
+                    </span>
+                  </>
+                ) : (
+                  item
+                )}
+              </li>
             ))}
           </ul>
         </div>

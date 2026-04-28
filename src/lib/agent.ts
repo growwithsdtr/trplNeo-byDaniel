@@ -14,12 +14,17 @@ export interface TravelerAgentResult {
   policyNotes: string[];
   directBookingRationale: string;
   source: "Hotel Knowledge Graph";
+  selectionReason: string;
   assistantMessage?: string;
   missingInformation?: string[];
 }
 
-function scoreHotel(query: string, hotel: HotelGraph) {
-  const text = [
+function hasAny(text: string, terms: string[]) {
+  return terms.some((term) => text.includes(term));
+}
+
+function hotelSearchText(hotel: HotelGraph) {
+  return [
     hotel.name,
     hotel.type,
     hotel.shortDescription,
@@ -29,11 +34,19 @@ function scoreHotel(query: string, hotel: HotelGraph) {
     hotel.petPolicyDetails.join(" "),
     hotel.businessTravelerAmenities.join(" "),
     hotel.roomTechAmenities.join(" "),
-    hotel.localActivities.map((activity) => activity.name).join(" "),
-    hotel.liveLocalUpdates.map((update) => update.travelerFacingSummary).join(" "),
+    hotel.localActivities.map((activity) => `${activity.name} ${activity.notes}`).join(" "),
+    hotel.liveLocalUpdates
+      .map((update) => `${update.category} ${update.title} ${update.travelerFacingSummary}`)
+      .join(" "),
+    hotel.promotions.join(" "),
+    hotel.policies.join(" "),
   ]
     .join(" ")
     .toLowerCase();
+}
+
+function scoreHotel(query: string, hotel: HotelGraph) {
+  const text = hotelSearchText(hotel);
 
   const queryTerms = query
     .toLowerCase()
@@ -45,17 +58,50 @@ function scoreHotel(query: string, hotel: HotelGraph) {
     0
   );
 
+  const wantsBusiness = hasAny(query, [
+    "business",
+    "presentation",
+    "wi-fi",
+    "wifi",
+    "hdmi",
+    "desk",
+    "workspace",
+    "late check-in",
+    "coin laundry",
+    "laundry",
+    "breakfast",
+  ]);
+  const wantsPet = hasAny(query, ["dog", "pet", "pets"]);
+  const wantsFamily = hasAny(query, ["kid", "kids", "child", "children", "family"]);
+  const wantsConcert = hasAny(query, ["concert", "shamisen", "samizen", "shamizen"]);
+  const wantsRyokan = hasAny(query, ["ryokan", "onsen", "local food", "kaiseki"]);
+
+  if (wantsBusiness) {
+    if (hotel.type.includes("business")) score += 18;
+    if (text.includes("180 mbps")) score += 4;
+    if (text.includes("hdmi")) score += 4;
+    if (text.includes("workspace") || text.includes("desk")) score += 4;
+    if (text.includes("late check-in")) score += 3;
+    if (text.includes("coin laundry")) score += 3;
+    if (text.includes("breakfast")) score += 3;
+  }
+  if (wantsPet && (text.includes("pet-friendly") || text.includes("dog"))) {
+    score += 18;
+  }
+  if (wantsFamily && (text.includes("family") || text.includes("children"))) {
+    score += 10;
+  }
+  if (wantsConcert) {
+    const approvedConcert = hotel.liveLocalUpdates.some((update) => {
+      const updateText = `${update.category} ${update.title} ${update.travelerFacingSummary}`.toLowerCase();
+      return update.status === "approved" && hasAny(updateText, ["concert", "shamisen"]);
+    });
+    if (approvedConcert) score += 42;
+  }
   if (query.includes("ryokan") && hotel.type.includes("ryokan")) score += 6;
-  if (query.includes("business") && hotel.type.includes("business")) score += 6;
-  if ((query.includes("dog") || query.includes("pet")) && text.includes("dog")) score += 8;
+  if (wantsRyokan && text.includes("onsen")) score += 14;
   if ((query.includes("lake") || query.includes("cycling")) && text.includes("cycling")) {
-    score += 7;
-  }
-  if ((query.includes("wi-fi") || query.includes("wifi") || query.includes("hdmi")) && text.includes("hdmi")) {
-    score += 7;
-  }
-  if ((query.includes("onsen") || query.includes("kaiseki")) && text.includes("onsen")) {
-    score += 7;
+    score += 9;
   }
 
   return score;
@@ -63,6 +109,7 @@ function scoreHotel(query: string, hotel: HotelGraph) {
 
 function relevantUpdates(query: string, hotel: HotelGraph) {
   const q = query.toLowerCase();
+  const wantsConcert = hasAny(q, ["concert", "shamisen", "samizen", "shamizen"]);
   return hotel.liveLocalUpdates
     .filter((update) => update.status === "approved")
     .filter((update) => {
@@ -74,12 +121,81 @@ function relevantUpdates(query: string, hotel: HotelGraph) {
       ]
         .join(" ")
         .toLowerCase();
+      if (wantsConcert && hasAny(updateText, ["concert", "shamisen"])) return true;
       return q
         .split(/[^a-z0-9]+/)
         .filter((term) => term.length > 3)
         .some((term) => updateText.includes(term));
     })
     .slice(0, 3);
+}
+
+function chooseRoom(query: string, hotel: HotelGraph) {
+  const q = query.toLowerCase();
+  if (hasAny(q, ["kid", "kids", "child", "children", "family"])) {
+    const familyRoom = hotel.roomTypes.find((room) =>
+      room.name.toLowerCase().includes("family")
+    );
+    if (familyRoom) return familyRoom;
+  }
+  if (hasAny(q, ["dog", "pet", "pets"])) {
+    const petRoom = hotel.roomTypes.find((room) =>
+      room.name.toLowerCase().includes("dog")
+    );
+    if (petRoom) return petRoom;
+  }
+  if (hasAny(q, ["wife", "husband", "partner", "two"])) {
+    const twinOrSuite = hotel.roomTypes.find((room) =>
+      hasAny(room.name.toLowerCase(), ["twin", "suite", "washitsu"])
+    );
+    if (twinOrSuite) return twinOrSuite;
+  }
+  return (
+    hotel.roomTypes.find((candidate) =>
+      candidate.availability.some((slot) => slot.available)
+    ) ?? hotel.roomTypes[0]
+  );
+}
+
+function selectionReasonFor(query: string, hotel: HotelGraph, updates: LiveLocalUpdate[]) {
+  const q = query.toLowerCase();
+  if (hasAny(q, ["concert", "shamisen", "samizen", "shamizen"]) && updates.length > 0) {
+    return `${hotel.name} was selected because its approved live/local updates match the requested concert experience.`;
+  }
+  if (hasAny(q, ["business", "presentation", "wifi", "wi-fi", "hdmi"])) {
+    return `${hotel.name} was selected because the graph includes business-traveler fit signals such as verified Wi-Fi, HDMI, workspace, late check-in, laundry, and breakfast.`;
+  }
+  if (hasAny(q, ["pet", "dog", "pets", "kids", "children", "family"])) {
+    return `${hotel.name} was selected because the graph includes pet and family policies that best match the traveler intent.`;
+  }
+  if (hasAny(q, ["onsen", "ryokan", "kaiseki", "local food"])) {
+    return `${hotel.name} was selected because the graph includes ryokan, onsen, and local-food signals.`;
+  }
+  return `${hotel.name} was selected as the best match from the provided Hotel Knowledge Graph.`;
+}
+
+function matchingCriteriaFor(query: string, hotel: HotelGraph, updates: LiveLocalUpdate[]) {
+  const q = query.toLowerCase();
+  if (hasAny(q, ["business", "presentation", "wifi", "wi-fi", "hdmi"])) {
+    return [
+      hotel.type,
+      "Verified high-speed Wi-Fi",
+      "HDMI-accessible TV",
+      "Workspace desk",
+      "Late check-in, coin laundry, and breakfast",
+    ];
+  }
+  if (hasAny(q, ["concert", "shamisen", "samizen", "shamizen"]) && updates.length > 0) {
+    return [hotel.type, "Approved live/local event update", updates[0].title];
+  }
+  if (hasAny(q, ["pet", "dog", "pets", "kids", "children", "family"])) {
+    return [hotel.type, ...hotel.petPolicyDetails.slice(0, 2), ...hotel.policies.slice(0, 1)];
+  }
+  return [
+    hotel.type,
+    ...hotel.amenities.slice(0, 3),
+    ...hotel.localActivities.slice(0, 1).map((activity) => activity.name),
+  ];
 }
 
 export function runTravelerAgent(
@@ -90,21 +206,14 @@ export function runTravelerAgent(
   const matchedHotel = [...hotels].sort(
     (a, b) => scoreHotel(normalizedQuery, b) - scoreHotel(normalizedQuery, a)
   )[0];
-  const room =
-    matchedHotel.roomTypes.find((candidate) =>
-      candidate.availability.some((slot) => slot.available)
-    ) ?? matchedHotel.roomTypes[0];
-  const availability = room.availability.find((slot) => slot.available) ?? room.availability[0];
   const updates = relevantUpdates(normalizedQuery, matchedHotel);
+  const room = chooseRoom(normalizedQuery, matchedHotel);
+  const availability = room.availability.find((slot) => slot.available) ?? room.availability[0];
 
   return {
     matchedHotelId: matchedHotel.id,
     hotelName: matchedHotel.name,
-    matchingCriteria: [
-      matchedHotel.type,
-      ...matchedHotel.amenities.slice(0, 3),
-      ...matchedHotel.localActivities.slice(0, 1).map((activity) => activity.name),
-    ],
+    matchingCriteria: matchingCriteriaFor(normalizedQuery, matchedHotel, updates),
     latestUpdatesUsed: updates,
     availableRoom: {
       roomType: room.name,
@@ -116,5 +225,6 @@ export function runTravelerAgent(
     directBookingRationale:
       "Direct booking is useful here because the hotel-owned graph can confirm room availability, current local details, and policy notes without relying on OTA-controlled summaries.",
     source: "Hotel Knowledge Graph",
+    selectionReason: selectionReasonFor(normalizedQuery, matchedHotel, updates),
   };
 }

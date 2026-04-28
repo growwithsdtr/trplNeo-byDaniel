@@ -17,7 +17,7 @@ export function calculateMetrics(
     freshnessScore: baseFreshness + freshnessLift,
     directBookingHandoffCount: handoffs.length,
     incrementalDirectGmvPotential: handoffs.reduce(
-      (total, handoff) => total + handoff.rateYen,
+      (total, handoff) => total + (handoff.rateYen ?? 0),
       0
     ),
     operatorTimeSavedMinutes: approvedUpdates.length * 8 + handoffs.length * 3,

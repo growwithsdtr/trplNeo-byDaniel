@@ -13,7 +13,8 @@ export type UpdateCategory =
   | "policy_update"
   | "guest_insight"
   | "crm_insight"
-  | "bot_insight";
+  | "bot_insight"
+  | "reputation_sensitive";
 
 export type UpdateSource =
   | "operator_text"
@@ -78,6 +79,10 @@ export interface LiveLocalUpdate {
   affectedDates: string[];
   affectedRoomTypes: string[];
   affectedOffer?: string;
+  eventTime?: string;
+  bookingDeadline?: string;
+  reputationSensitive?: boolean;
+  sanitizedTravelerCopy?: boolean;
   priceImpact: string;
   travelerFacingSummary: string;
   internalNotes: string;
@@ -118,7 +123,13 @@ export interface BookingHandoff {
   checkInDate: string;
   checkOutDate: string;
   guests: number;
-  rateYen: number;
+  adults?: number;
+  children?: number;
+  pets?: number;
+  rateYen?: number;
+  handoffType?: "verified_booking_handoff" | "booking_inquiry_handoff";
+  availabilityVerified?: boolean;
+  rateNote?: string;
   liveLocalUpdateUsed: string;
   bookingUrl: string;
   createdAt: string;

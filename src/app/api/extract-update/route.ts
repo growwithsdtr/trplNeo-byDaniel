@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { baselineHotels } from "@/data/hotels";
+import { DEMO_DATE_CONTEXT } from "@/lib/demo-date";
 import { deterministicExtractUpdate } from "@/lib/extraction";
 import type { LiveLocalUpdate, RiskLevel, UpdateCategory } from "@/lib/types";
 
@@ -17,6 +18,7 @@ const categories: UpdateCategory[] = [
   "guest_insight",
   "crm_insight",
   "bot_insight",
+  "reputation_sensitive",
 ];
 
 const riskLevels: RiskLevel[] = ["low", "medium", "high"];
@@ -33,6 +35,13 @@ function normalizeOpenAiUpdate(
   parsed: Record<string, unknown>,
   fallback: LiveLocalUpdate
 ): LiveLocalUpdate {
+  if (
+    fallback.reputationSensitive ||
+    (fallback.category === "local_event" && fallback.title === "Shamisen concert")
+  ) {
+    return fallback;
+  }
+
   const travelerFacingSummary =
     typeof parsed.travelerFacingSummary === "string"
       ? parsed.travelerFacingSummary
@@ -55,6 +64,10 @@ function normalizeOpenAiUpdate(
     "cleanliness",
     "safe",
     "safety",
+    "vomit",
+    "vomited",
+    "drunk",
+    "incident",
   ].some((term) => riskText.includes(term));
   const riskLevel = hasHighRiskTerm
     ? "high"
@@ -137,7 +150,7 @@ export async function POST(request: Request) {
           {
             role: "system",
             content:
-              "Extract a hotel operator update into JSON. Use only the supplied text. Do not invent prices, availability, amenities, or policies.",
+              `Extract a hotel operator update into JSON. Use only the supplied text. Do not invent prices, availability, amenities, or policies. Treat the demo date context as ${DEMO_DATE_CONTEXT}. Resolve today/tomorrow/this weekend against that date. If an update is reputation-sensitive, sanitize traveler-facing copy and keep raw incident details only in internalNotes.`,
           },
           {
             role: "user",
