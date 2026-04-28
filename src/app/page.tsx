@@ -16,8 +16,11 @@ import { HotelSelector } from "@/components/hotel-selector";
 import { JsonViewer } from "@/components/json-viewer";
 import { MetricsTiles } from "@/components/metrics-tiles";
 import { baselineHotels, travelerQueryExamples, updateExamples } from "@/data/hotels";
+import { runTravelerAgent, type TravelerAgentResult } from "@/lib/agent";
+import { deterministicExtractUpdate } from "@/lib/extraction";
 import { calculateMetrics } from "@/lib/metrics";
 import { buildHotelJsonLd } from "@/lib/schema";
+import type { AuditLogEntry, HotelGraph, LiveLocalUpdate } from "@/lib/types";
 
 type TabId = "console" | "graph" | "agent" | "metrics";
 
@@ -72,26 +75,34 @@ const tourSteps: TourStep[] = [
 ];
 
 export default function Home() {
+  const [hotels, setHotels] = useState<HotelGraph[]>(baselineHotels);
+  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("console");
   const [selectedHotelId, setSelectedHotelId] = useState(baselineHotels[0].id);
+  const [updateText, setUpdateText] = useState(updateExamples[0]);
+  const [structuredUpdate, setStructuredUpdate] =
+    useState<LiveLocalUpdate | null>(null);
+  const [travelerQuery, setTravelerQuery] = useState(travelerQueryExamples[0]);
+  const [agentResult, setAgentResult] = useState<TravelerAgentResult | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
 
   const selectedHotel = useMemo(
     () =>
-      baselineHotels.find((hotel) => hotel.id === selectedHotelId) ??
-      baselineHotels[0],
-    [selectedHotelId]
+      hotels.find((hotel) => hotel.id === selectedHotelId) ?? hotels[0],
+    [hotels, selectedHotelId]
   );
 
-  const metrics = useMemo(() => calculateMetrics(baselineHotels), []);
+  const metrics = useMemo(() => calculateMetrics(hotels), [hotels]);
   const jsonLd = useMemo(() => buildHotelJsonLd(selectedHotel), [selectedHotel]);
 
   function startTour() {
+    resetDemo();
     setTourOpen(true);
     setTourStep(0);
     setActiveTab("console");
     setSelectedHotelId("nikko-cedar-ryokan");
+    setUpdateText(updateExamples[0]);
   }
 
   function goToTourStep(nextStep: number) {
@@ -99,8 +110,94 @@ export default function Home() {
       setTourOpen(false);
       return;
     }
+    if (nextStep === 2 && !structuredUpdate) {
+      handleExtractUpdate();
+    }
+    if (nextStep === 3 && structuredUpdate?.status !== "approved") {
+      handleApproveUpdate();
+    }
+    if (nextStep === 5) {
+      setTravelerQuery(travelerQueryExamples[0]);
+    }
+    if (nextStep === 6) {
+      handleRunAgent();
+    }
     setTourStep(nextStep);
     setActiveTab(tourSteps[nextStep].tab as TabId);
+  }
+
+  function resetDemo() {
+    setHotels(baselineHotels);
+    setAuditLog([]);
+    setSelectedHotelId("nikko-cedar-ryokan");
+    setUpdateText(updateExamples[0]);
+    setStructuredUpdate(null);
+    setTravelerQuery(travelerQueryExamples[0]);
+    setAgentResult(null);
+  }
+
+  function handleExtractUpdate() {
+    const extracted = deterministicExtractUpdate(updateText, selectedHotel);
+    setStructuredUpdate(extracted);
+    return extracted;
+  }
+
+  function handleApproveUpdate(update = structuredUpdate) {
+    if (!update) return;
+    const approvedUpdate: LiveLocalUpdate = {
+      ...update,
+      status: "approved",
+      approvedAt: "2026-04-28T12:03:00+09:00",
+      lastVerifiedAt: "2026-04-28T12:03:00+09:00",
+    };
+
+    setHotels((currentHotels) =>
+      currentHotels.map((hotel) => {
+        if (hotel.id !== approvedUpdate.hotelId) return hotel;
+        const withoutDraftDuplicate = hotel.liveLocalUpdates.filter(
+          (existing) => existing.id !== approvedUpdate.id
+        );
+        return {
+          ...hotel,
+          liveLocalUpdates: [...withoutDraftDuplicate, approvedUpdate],
+          maintenanceNotices:
+            approvedUpdate.category === "maintenance"
+              ? [approvedUpdate.travelerFacingSummary, ...hotel.maintenanceNotices]
+              : hotel.maintenanceNotices,
+          promotions:
+            approvedUpdate.category === "promotion"
+              ? [approvedUpdate.travelerFacingSummary, ...hotel.promotions]
+              : hotel.promotions,
+          lastVerifiedAt: approvedUpdate.lastVerifiedAt,
+        };
+      })
+    );
+
+    const hotelName =
+      hotels.find((hotel) => hotel.id === approvedUpdate.hotelId)?.name ??
+      selectedHotel.name;
+
+    setAuditLog((entries) => [
+      {
+        id: `audit-${approvedUpdate.id}`,
+        timestamp: approvedUpdate.approvedAt ?? approvedUpdate.lastVerifiedAt,
+        hotel: hotelName,
+        category: approvedUpdate.category,
+        source: approvedUpdate.source,
+        riskLevel: approvedUpdate.riskLevel,
+        approvedBy: "operator",
+        status: "approved",
+      },
+      ...entries,
+    ]);
+    setStructuredUpdate(approvedUpdate);
+  }
+
+  function handleRunAgent() {
+    const result = runTravelerAgent(travelerQuery, hotels);
+    setAgentResult(result);
+    setSelectedHotelId(result.matchedHotelId);
+    return result;
   }
 
   return (
@@ -134,6 +231,7 @@ export default function Home() {
               </button>
               <button
                 type="button"
+                onClick={resetDemo}
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
               >
                 <RotateCcw className="h-4 w-4" />
@@ -180,14 +278,29 @@ export default function Home() {
           <section className="min-w-0">
             {activeTab === "console" ? (
               <ConsoleTab
+                hotels={hotels}
                 selectedHotelId={selectedHotelId}
                 setSelectedHotelId={setSelectedHotelId}
+                updateText={updateText}
+                setUpdateText={setUpdateText}
+                structuredUpdate={structuredUpdate}
+                onExtract={handleExtractUpdate}
+                onApprove={handleApproveUpdate}
+                onReject={() => setStructuredUpdate(null)}
+                auditLog={auditLog}
               />
             ) : null}
             {activeTab === "graph" ? (
               <KnowledgeGraphTab hotel={selectedHotel} jsonLd={jsonLd} />
             ) : null}
-            {activeTab === "agent" ? <AgentTab hotelName={selectedHotel.name} /> : null}
+            {activeTab === "agent" ? (
+              <AgentTab
+                travelerQuery={travelerQuery}
+                setTravelerQuery={setTravelerQuery}
+                agentResult={agentResult}
+                onRunAgent={handleRunAgent}
+              />
+            ) : null}
             {activeTab === "metrics" ? <MetricsTab metrics={metrics} /> : null}
           </section>
         </section>
@@ -211,27 +324,42 @@ export default function Home() {
 }
 
 function ConsoleTab({
+  hotels,
   selectedHotelId,
   setSelectedHotelId,
+  updateText,
+  setUpdateText,
+  structuredUpdate,
+  onExtract,
+  onApprove,
+  onReject,
+  auditLog,
 }: {
+  hotels: HotelGraph[];
   selectedHotelId: string;
   setSelectedHotelId: (hotelId: string) => void;
+  updateText: string;
+  setUpdateText: (value: string) => void;
+  structuredUpdate: LiveLocalUpdate | null;
+  onExtract: () => LiveLocalUpdate;
+  onApprove: () => void;
+  onReject: () => void;
+  auditLog: AuditLogEntry[];
 }) {
   const selectedHotel =
-    baselineHotels.find((hotel) => hotel.id === selectedHotelId) ??
-    baselineHotels[0];
+    hotels.find((hotel) => hotel.id === selectedHotelId) ?? hotels[0];
 
   return (
     <div className="grid gap-4">
       <Panel
-        eyebrow="Stage A foundation"
+        eyebrow="Operator AI control layer"
         title="Okami-san Live Update Console"
-        description="Operator update extraction and approval arrive in Stage B. This shell shows the final workflow and example inputs."
+        description="Hotel staff add live, local, time-sensitive information. The demo extracts structured fields, flags risk, and requires approval before publishing."
       >
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
           <div className="space-y-4">
             <HotelSelector
-              hotels={baselineHotels}
+              hotels={hotels}
               selectedHotelId={selectedHotelId}
               onChange={setSelectedHotelId}
             />
@@ -244,27 +372,51 @@ function ConsoleTab({
           </div>
           <div className="space-y-3">
             <textarea
-              readOnly
-              value="Tomorrow the outdoor onsen will have yuzu aroma."
-              className="min-h-28 w-full rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-sm"
+              value={updateText}
+              onChange={(event) => setUpdateText(event.target.value)}
+              className="min-h-28 w-full rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-sm transition focus:border-blue-600"
             />
             <div className="flex flex-wrap gap-2">
               {updateExamples.map((example) => (
                 <button
                   key={example}
                   type="button"
+                  onClick={() => {
+                    setUpdateText(example);
+                    onReject();
+                  }}
                   className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-left text-xs font-medium text-zinc-600 shadow-sm"
                 >
                   {example}
                 </button>
               ))}
             </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onExtract}
+                className="inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+              >
+                Extract structured update
+              </button>
+              <button
+                type="button"
+                onClick={onReject}
+                className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+              >
+                Reject / reset update
+              </button>
+            </div>
           </div>
         </div>
-        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-800">
-          Stage B will turn this into a working flow: text update → structured
-          extraction → risk review → operator approval → graph mutation.
-        </div>
+        {structuredUpdate ? (
+          <StructuredUpdateCard update={structuredUpdate} onApprove={onApprove} />
+        ) : (
+          <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-800">
+            Add an operator update and extract it into a structured,
+            reviewable graph mutation.
+          </div>
+        )}
       </Panel>
       <Guardrails />
       <Panel
@@ -283,6 +435,7 @@ function ConsoleTab({
           ))}
         </div>
       </Panel>
+      <AuditLog entries={auditLog} />
     </div>
   );
 }
@@ -318,41 +471,119 @@ function KnowledgeGraphTab({
   );
 }
 
-function AgentTab({ hotelName }: { hotelName: string }) {
+function AgentTab({
+  travelerQuery,
+  setTravelerQuery,
+  agentResult,
+  onRunAgent,
+}: {
+  travelerQuery: string;
+  setTravelerQuery: (query: string) => void;
+  agentResult: TravelerAgentResult | null;
+  onRunAgent: () => TravelerAgentResult;
+}) {
   return (
     <div className="grid gap-4">
       <Panel
         eyebrow="Traveler-facing AI"
         title="Traveler AI Agent Simulation"
-        description="Stage B will make the agent read the current in-session graph. Stage C adds QR booking handoff."
+        description="The simulated agent reads only from the current structured Hotel Knowledge Graph. It must not invent prices, availability, amenities, policies, or activities."
       >
         <textarea
-          readOnly
-          value="I want a quiet ryokan in Nikko this weekend with onsen, local food, and a special experience."
-          className="min-h-28 w-full rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-sm"
+          value={travelerQuery}
+          onChange={(event) => setTravelerQuery(event.target.value)}
+          className="min-h-28 w-full rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-sm transition focus:border-blue-600"
         />
         <div className="mt-3 flex flex-wrap gap-2">
           {travelerQueryExamples.map((query) => (
             <button
               key={query}
               type="button"
+              onClick={() => setTravelerQuery(query)}
               className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-left text-xs font-medium text-zinc-600 shadow-sm"
             >
               {query}
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          onClick={onRunAgent}
+          className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+        >
+          Run traveler query
+        </button>
       </Panel>
-      <Panel
-        eyebrow="Static preview"
-        title={`Likely match: ${hotelName}`}
-        description="Source: Hotel Knowledge Graph"
-      >
-        <p className="text-sm leading-6 text-zinc-600">
-          The final flow will cite only structured hotel facts, show room/rate
-          only when present in JSON, and explain why direct booking is useful.
-        </p>
-      </Panel>
+      {agentResult ? (
+        <Panel
+          eyebrow="Agent answer"
+          title={`Matched hotel: ${agentResult.hotelName}`}
+          description="Source: Hotel Knowledge Graph"
+        >
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+              <h3 className="text-sm font-semibold text-zinc-950">Matching criteria</h3>
+              <ul className="mt-2 space-y-1.5 text-sm leading-6 text-zinc-600">
+                {agentResult.matchingCriteria.map((criterion) => (
+                  <li key={criterion}>{criterion}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+              <h3 className="text-sm font-semibold text-zinc-950">Verified room and rate</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-600">
+                {agentResult.availableRoom.roomType} on {agentResult.availableRoom.date}
+                : {agentResult.availableRoom.remaining} left at ¥
+                {agentResult.rateYen.toLocaleString()}.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-zinc-950">
+              Latest live/local updates used
+            </h3>
+            {agentResult.latestUpdatesUsed.length > 0 ? (
+              <ul className="mt-2 space-y-1.5 text-sm leading-6 text-zinc-600">
+                {agentResult.latestUpdatesUsed.map((update) => (
+                  <li key={update.id}>{update.travelerFacingSummary}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm leading-6 text-zinc-600">
+                No query-relevant fresh updates were needed for this match.
+              </p>
+            )}
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+              <h3 className="text-sm font-semibold text-zinc-950">Policy notes</h3>
+              <ul className="mt-2 space-y-1.5 text-sm leading-6 text-zinc-600">
+                {agentResult.policyNotes.map((policy) => (
+                  <li key={policy}>{policy}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <h3 className="text-sm font-semibold text-blue-950">
+                Why direct booking is useful
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-blue-800">
+                {agentResult.directBookingRationale}
+              </p>
+            </div>
+          </div>
+        </Panel>
+      ) : (
+        <Panel
+          eyebrow="Ready"
+          title="Run a traveler query"
+          description="The answer will cite Source: Hotel Knowledge Graph and use only known facts."
+        >
+          <p className="text-sm leading-6 text-zinc-600">
+            No traveler-agent response yet.
+          </p>
+        </Panel>
+      )}
     </div>
   );
 }
@@ -384,6 +615,133 @@ function MetricsTab({ metrics }: { metrics: ReturnType<typeof calculateMetrics> 
         </div>
       </Panel>
     </div>
+  );
+}
+
+function StructuredUpdateCard({
+  update,
+  onApprove,
+}: {
+  update: LiveLocalUpdate;
+  onApprove: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+            Extracted structured update
+          </p>
+          <h3 className="mt-2 text-base font-semibold text-zinc-950">
+            {update.title}
+          </h3>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span
+            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+              update.riskLevel === "high"
+                ? "bg-amber-100 text-amber-800"
+                : "bg-emerald-100 text-emerald-800"
+            }`}
+          >
+            {update.riskLevel} risk
+          </span>
+          <span className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
+            {update.requiresApproval ? "Approval required" : "Review before publish"}
+          </span>
+          <span className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
+            {update.status}
+          </span>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <Fact label="Category" value={update.category} />
+        <Fact label="Affected dates" value={update.affectedDates.join(", ")} />
+        <Fact
+          label="Affected rooms"
+          value={update.affectedRoomTypes.join(", ") || "No room-specific impact"}
+        />
+        <Fact label="Price impact" value={update.priceImpact} />
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+            EN preview
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.en}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+            JA preview
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.ja}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+            KO preview
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.ko}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+            Traditional Chinese preview
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.zhTW}</p>
+        </div>
+      </div>
+      <JsonViewer value={update} title="Structured update JSON" />
+      <button
+        type="button"
+        onClick={onApprove}
+        disabled={update.status === "approved"}
+        className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {update.riskLevel === "high" ? "Approve high-risk update" : "Approve update"}
+      </button>
+    </div>
+  );
+}
+
+function AuditLog({ entries }: { entries: AuditLogEntry[] }) {
+  return (
+    <Panel
+      eyebrow="Audit log"
+      title="Session log"
+      description="In-memory session log. It clears on refresh or Reset Demo."
+    >
+      {entries.length === 0 ? (
+        <p className="text-sm leading-6 text-zinc-600">No approved updates yet.</p>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-zinc-200">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-50 text-xs uppercase tracking-[0.12em] text-zinc-500">
+              <tr>
+                <th className="px-3 py-2">Time</th>
+                <th className="px-3 py-2">Hotel</th>
+                <th className="px-3 py-2">Category</th>
+                <th className="px-3 py-2">Risk</th>
+                <th className="px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-200">
+              {entries.map((entry) => (
+                <tr key={entry.id}>
+                  <td className="px-3 py-2 font-mono text-xs text-zinc-600">
+                    {entry.timestamp}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-700">{entry.hotel}</td>
+                  <td className="px-3 py-2 text-zinc-700">{entry.category}</td>
+                  <td className="px-3 py-2 text-zinc-700">{entry.riskLevel}</td>
+                  <td className="px-3 py-2 text-zinc-700">
+                    {entry.status} by {entry.approvedBy}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }
 
