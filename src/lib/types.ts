@@ -126,6 +126,7 @@ export interface BookingHandoff {
   adults?: number;
   children?: number;
   pets?: number;
+  bedConfiguration?: string;
   rateYen?: number;
   handoffType?: "verified_booking_handoff" | "booking_inquiry_handoff";
   availabilityVerified?: boolean;

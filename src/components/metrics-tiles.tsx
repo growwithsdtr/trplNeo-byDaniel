@@ -53,7 +53,7 @@ export function MetricsTiles({ metrics }: MetricsTilesProps) {
               <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
                 {tile.label}
               </p>
-              <Icon className="h-4 w-4 text-blue-600" />
+              <Icon className="h-4 w-4 text-zinc-500" />
             </div>
             <p className="mt-4 text-2xl font-semibold tracking-tight text-zinc-950">
               {tile.value}

@@ -17,7 +17,7 @@ export function HotelSelector({
       <select
         value={selectedHotelId}
         onChange={(event) => onChange(event.target.value)}
-        className="h-11 rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-950 shadow-sm transition hover:border-zinc-300 focus:border-blue-600"
+        className="h-11 rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-950 shadow-sm transition hover:border-orange-300 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
       >
         {hotels.map((hotel) => (
           <option key={hotel.id} value={hotel.id}>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import {
   BadgeCheck,
   Bot,
@@ -26,7 +27,7 @@ import {
 } from "@/lib/demo-date";
 import { deterministicExtractUpdate } from "@/lib/extraction";
 import { parseTravelerIntent } from "@/lib/intent";
-import { calculateMetrics } from "@/lib/metrics";
+import { calculateMetrics, formatYen } from "@/lib/metrics";
 import { buildHotelJsonLd } from "@/lib/schema";
 import type {
   AuditLogEntry,
@@ -41,12 +42,12 @@ type TravelerAgentMode = "deterministic" | "llm-grounded";
 const tabs: Array<{ id: TabId; label: string; icon: typeof ClipboardCheck }> = [
   {
     id: "console",
-    label: "Hotel Operator Live & Local Update Console",
+    label: "Hotel Operator Console — Live & Local Updates",
     icon: ClipboardCheck,
   },
   { id: "graph", label: "Live & Local Hotel Knowledge Graph", icon: Database },
-  { id: "metrics", label: "Metrics & AI Discoverability Audit", icon: BadgeCheck },
-  { id: "agent", label: "Traveler AI Agent Simulation", icon: Bot },
+  { id: "agent", label: "Traveler AI Agent — Discovery to Booking", icon: Bot },
+  { id: "metrics", label: "Metrics, Audit & Agent Tools", icon: BadgeCheck },
 ];
 
 const tourSteps: TourStep[] = [
@@ -57,7 +58,7 @@ const tourSteps: TourStep[] = [
   },
   {
     title: "Add a live/local operator update",
-    body: "The hotel operator and Okami-san（女将） console is where hotel staff will add time-sensitive information without a complex dashboard.",
+    body: "The Hotel Operator Console — Live & Local Updates tab is where hotel staff add time-sensitive facts without a complex dashboard.",
     tab: "console",
   },
   {
@@ -71,13 +72,8 @@ const tourSteps: TourStep[] = [
     tab: "graph",
   },
   {
-    title: "See readiness improve",
-    body: "Metrics turn the AI work into outcome thinking: freshness, direct handoffs, and GMV potential.",
-    tab: "metrics",
-  },
-  {
     title: "Run a traveler query",
-    body: "The simulated agent only reads from the current Hotel Knowledge Graph and cites its source.",
+    body: "The traveler agent searches all three Hotel Knowledge Graphs and cites its source.",
     tab: "agent",
   },
   {
@@ -90,6 +86,11 @@ const tourSteps: TourStep[] = [
     body: "The prototype stops at verified quote and direct booking handoff. Payment execution is deliberately out of scope.",
     tab: "agent",
   },
+  {
+    title: "Review metrics and tools",
+    body: "Metrics, Audit & Agent Tools turns the AI work into outcome thinking, OaaS unit economics, and tool/API clarity.",
+    tab: "metrics",
+  },
 ];
 
 interface BookingIntent {
@@ -99,6 +100,7 @@ interface BookingIntent {
   adults: number;
   children: number;
   pets: number;
+  bedConfiguration: string;
   roomType: string;
   hotelName: string;
   estimatedRateYen?: number;
@@ -170,6 +172,7 @@ export default function Home() {
   const [handoffs, setHandoffs] = useState<BookingHandoff[]>([]);
   const [latestHandoff, setLatestHandoff] = useState<BookingHandoff | null>(null);
   const [handoffStatus, setHandoffStatus] = useState<"idle" | "created">("idle");
+  const [agentMatchCount, setAgentMatchCount] = useState(0);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const extractionRequestId = useRef(0);
@@ -208,13 +211,13 @@ export default function Home() {
     if (nextStep >= 3 && updateForApproval?.status !== "approved") {
       handleApproveUpdate(updateForApproval);
     }
-    if (nextStep === 5) {
+    if (nextStep === 4) {
       setTravelerQuery(travelerQueryExamples[0]);
     }
-    if (nextStep === 6) {
+    if (nextStep === 5) {
       handleRunAgent();
     }
-    if (nextStep === 7) {
+    if (nextStep === 6) {
       const result = agentResult ?? handleRunAgent();
       handleCreateHandoff(result);
     }
@@ -237,6 +240,7 @@ export default function Home() {
     setHandoffs([]);
     setLatestHandoff(null);
     setHandoffStatus("idle");
+    setAgentMatchCount(0);
     setTourOpen(false);
     setTourStep(0);
     extractionRequestId.current += 1;
@@ -379,6 +383,7 @@ export default function Home() {
   function handleRunAgent() {
     const result = runTravelerAgent(travelerQuery, hotels);
     setAgentResult(result);
+    setAgentMatchCount((count) => count + 1);
     setAgentMode("deterministic");
     setLatestHandoff(null);
     setHandoffStatus("idle");
@@ -450,6 +455,7 @@ export default function Home() {
       adults: intent.adults,
       children: intent.children,
       pets: intent.pets,
+      bedConfiguration: intent.bedConfiguration,
       rateYen: intent.estimatedRateYen,
       handoffType: intent.handoffType,
       availabilityVerified: intent.availabilityVerified,
@@ -457,7 +463,7 @@ export default function Home() {
       liveLocalUpdateUsed: intent.liveLocalUpdateUsed,
       bookingUrl: `https://example.com/triplaNeoByDaniel/book/${result.matchedHotelId}?room=${encodeURIComponent(
         intent.roomType
-      )}&checkIn=${intent.checkInDate}&checkOut=${intent.checkOutDate}&adults=${intent.adults}&children=${intent.children}&pets=${intent.pets}`,
+      )}&checkIn=${intent.checkInDate}&checkOut=${intent.checkOutDate}&adults=${intent.adults}&children=${intent.children}&pets=${intent.pets}&bed=${encodeURIComponent(intent.bedConfiguration)}`,
       createdAt: DEMO_HANDOFF_AT,
     };
     setHandoffs((current) => [handoff, ...current]);
@@ -472,25 +478,31 @@ export default function Home() {
         <header className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+              <div className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-600">
                 <Sparkles className="h-3.5 w-3.5" />
                 Demo by Daniel Jimenez
               </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-zinc-950">
-                triplaNeoByDaniel
-              </h1>
+              <div className="mt-4 flex items-center gap-3">
+                <Image
+                  src="/triplaNeo-byDaniel-logo.png"
+                  alt="triplaNeo by Daniel logo"
+                  width={60}
+                  height={40}
+                  className="h-10 w-auto rounded-md object-contain"
+                />
+                <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
+                  triplaNeo (by Daniel)
+                </h1>
+              </div>
               <p className="mt-2 text-lg font-medium text-zinc-800">
-                Agentic Direct Booking Infrastructure for the AI Travel Era
-              </p>
-              <p className="mt-1 text-sm text-zinc-500">
-                Powered by a Live & Local Hotel Knowledge Graph
+                Agentic Hotel Discovery & Direct Booking for the AI Travel Era
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <button
                 type="button"
                 onClick={startTour}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-orange-500 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
               >
                 <Sparkles className="h-4 w-4" />
                 Start Demo Tour
@@ -498,7 +510,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={resetDemo}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-orange-200 bg-white px-4 text-sm font-medium text-orange-700 shadow-sm transition hover:border-orange-300 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
               >
                 <RotateCcw className="h-4 w-4" />
                 Reset Demo
@@ -507,8 +519,8 @@ export default function Home() {
           </div>
           <div className="mt-5 grid gap-3 border-t border-zinc-100 pt-5 text-sm text-zinc-600 md:grid-cols-3">
             <p className="md:col-span-3">
-              Live & local hotel knowledge → AI discoverability → verified direct
-              booking handoff
+              Live & local hotel knowledge enriched at source → Enhanced AI hotel
+              discoverability → Higher conversion with verified direct booking handoff
             </p>
           </div>
         </header>
@@ -526,8 +538,8 @@ export default function Home() {
                     onClick={() => setActiveTab(tab.id)}
                     className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium transition ${
                       isActive
-                        ? "bg-zinc-950 text-white"
-                        : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"
+                        ? "bg-orange-500 text-white"
+                        : "text-zinc-600 hover:bg-orange-50 hover:text-orange-700"
                     }`}
                   >
                     <Icon className="h-4 w-4 shrink-0" />
@@ -538,7 +550,7 @@ export default function Home() {
             </nav>
             <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs leading-5 text-zinc-600">
               Synthetic data only. Production would scale this graph across
-              tripla-powered properties and connect it to direct-booking actions.
+              hotel groups and connect it to direct-booking actions.
             </div>
           </aside>
 
@@ -576,7 +588,11 @@ export default function Home() {
               />
             ) : null}
             {activeTab === "metrics" ? (
-              <MetricsTab metrics={metrics} />
+              <MetricsTab
+                metrics={metrics}
+                agentMatchCount={agentMatchCount}
+                handoffCount={handoffs.length}
+              />
             ) : null}
           </section>
         </section>
@@ -636,110 +652,94 @@ function ConsoleTab({
     <div className="grid gap-4">
       <Panel
         eyebrow="Hotel Operator & Okami-san（女将）"
-        title="Hotel Operator Live & Local Update Console"
+        title="Hotel Operator Console — Live & Local Updates"
         description="This is where hotel staff add fresh information that OTAs and stale crawlers usually miss."
       >
-        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
-          Current hotel context: {selectedHotel.name}
-        </div>
-        <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-950">
-                Set Live & Local Updates
-              </h3>
-              <p className="mt-1 text-sm leading-6 text-zinc-600">
-                This is where hotel staff add fresh information that OTAs and
-                stale crawlers usually miss.
-              </p>
-            </div>
-            <HotelSelector
-              hotels={hotels}
-              selectedHotelId={selectedHotelId}
-              onChange={setSelectedHotelId}
-            />
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-              <p className="text-sm font-medium text-zinc-950">Voice input</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-600">
-                Voice input disabled in demo environment. Use text input.
-              </p>
-            </div>
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-950">
+              Set Live & Local Updates
+            </h3>
+            <p className="mt-1 text-sm leading-6 text-zinc-600">
+              This is where hotel staff add fresh information that OTAs and
+              stale crawlers usually miss.
+            </p>
           </div>
-          <div className="space-y-3">
-            <textarea
-              value={updateText}
-              onChange={(event) => setUpdateText(event.target.value)}
-              className="min-h-28 w-full rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-sm transition focus:border-blue-600"
-            />
-            <div className="flex flex-wrap gap-2">
-              {updateExamples.map((example) => (
+          <HotelSelector
+            hotels={hotels}
+            selectedHotelId={selectedHotelId}
+            onChange={setSelectedHotelId}
+          />
+          <SelectedHotelFacts hotel={selectedHotel} />
+          <textarea
+            value={updateText}
+            onChange={(event) => setUpdateText(event.target.value)}
+            className="min-h-28 w-full rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-sm transition focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+          />
+          <div className="flex flex-wrap gap-2">
+            {updateExamples.map((example) => (
+              <button
+                key={example.label}
+                type="button"
+                onClick={() => {
+                  setUpdateText(example.text);
+                  onReject();
+                }}
+                className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-left text-xs text-zinc-600 shadow-sm transition hover:border-orange-300 hover:bg-orange-50 hover:text-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+              >
+                <span className="font-semibold text-zinc-900">
+                  {example.label}:
+                </span>{" "}
+                {example.text}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={onExtract}
+            disabled={isExtracting}
+            className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isExtracting ? "Extracting..." : "Extract structured update"}
+          </button>
+          {structuredUpdate ? (
+            <>
+              <StructuredUpdatePreview update={structuredUpdate} />
+              <div className="flex flex-wrap gap-2">
                 <button
-                  key={example.label}
                   type="button"
-                  onClick={() => {
-                    setUpdateText(example.text);
-                    onReject();
-                  }}
-                  className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-left text-xs text-zinc-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                  onClick={() => onApprove()}
+                  disabled={structuredUpdate.status === "approved"}
+                  className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <span className="font-semibold text-zinc-900">
-                    {example.label}:
-                  </span>{" "}
-                  {example.text}
+                  {structuredUpdate.riskLevel === "high"
+                    ? "Approve high-risk update"
+                    : "Approve update"}
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={onReject}
+                  className="inline-flex h-10 items-center justify-center rounded-md border border-orange-200 bg-white px-4 text-sm font-medium text-orange-700 shadow-sm transition hover:border-orange-300 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                >
+                  Reject / reset update
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm leading-6 text-zinc-600">
+              Add an operator update and extract it into a structured,
+              reviewable graph mutation.
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={onExtract}
-                disabled={isExtracting}
-                className="inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
-              >
-                {isExtracting ? "Extracting..." : "Extract structured update"}
-              </button>
-              <button
-                type="button"
-                onClick={onReject}
-                className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
-              >
-                Reject / reset update
-              </button>
+          )}
+          {operatorMessage ? (
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-700">
+              {operatorMessage}
             </div>
-          </div>
+          ) : null}
+          <BehindTheScenes update={structuredUpdate} auditLog={auditLog} />
         </div>
-        {structuredUpdate ? (
-          <StructuredUpdateCard update={structuredUpdate} onApprove={onApprove} />
-        ) : (
-          <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-800">
-            Add an operator update and extract it into a structured,
-            reviewable graph mutation.
-          </div>
-        )}
-        {operatorMessage ? (
-          <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-700">
-            {operatorMessage}
-          </div>
-        ) : null}
       </Panel>
       <Guardrails />
-      <Panel
-        eyebrow="Selected hotel facts"
-        title={selectedHotel.name}
-        description={selectedHotel.shortDescription}
-      >
-        <div className="flex flex-wrap gap-2">
-          {selectedHotel.amenities.map((amenity) => (
-            <span
-              key={amenity}
-              className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600"
-            >
-              {amenity}
-            </span>
-          ))}
-        </div>
-      </Panel>
-      <AuditLog entries={auditLog} />
     </div>
   );
 }
@@ -780,7 +780,7 @@ function KnowledgeGraphTab({
           <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-xs font-medium uppercase tracking-[0.16em] text-blue-600">
+                <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
                   Schema.org validator affordance
                 </p>
                 <h3 className="mt-1 text-base font-semibold text-zinc-950">
@@ -792,14 +792,14 @@ function KnowledgeGraphTab({
                   href={`/api/schema/${hotel.id}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-orange-200 bg-white px-3 text-sm font-medium text-orange-700 shadow-sm transition hover:border-orange-300 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
                 >
                   Open JSON-LD URL
                 </a>
                 <button
                   type="button"
                   onClick={copyJsonLd}
-                  className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-orange-200 bg-white px-3 text-sm font-medium text-orange-700 shadow-sm transition hover:border-orange-300 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
                 >
                   {copied ? "Copied" : "Copy JSON-LD"}
                 </button>
@@ -807,7 +807,7 @@ function KnowledgeGraphTab({
                   href="https://validator.schema.org/"
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-9 items-center justify-center rounded-md bg-zinc-950 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+                  className="inline-flex h-9 items-center justify-center rounded-md bg-orange-500 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
                 >
                   Open Schema Validator
                 </a>
@@ -862,17 +862,17 @@ function AgentTab({
     <div className="grid gap-4">
       <Panel
         eyebrow="Traveler-facing AI"
-        title="Traveler AI Agent Simulation"
+        title="Traveler AI Agent — Discovery to Booking"
         description="The simulated agent searches across all 3 hotel knowledge graphs by default. It must not invent prices, availability, amenities, policies, or activities."
       >
-        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
+        <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm font-medium text-zinc-700">
           Search scope: all 3 hotel knowledge graphs. Booking handoff follows the
           agent-selected hotel, not the operator-selected hotel.
         </div>
         <textarea
           value={travelerQuery}
           onChange={(event) => setTravelerQuery(event.target.value)}
-          className="min-h-28 w-full rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-sm transition focus:border-blue-600"
+          className="min-h-28 w-full rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-sm transition focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
         />
         <div className="mt-3 flex flex-wrap gap-2">
           {travelerQueryExamples.map((query) => (
@@ -880,7 +880,7 @@ function AgentTab({
               key={query}
               type="button"
               onClick={() => setTravelerQuery(query)}
-              className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-left text-xs font-medium text-zinc-600 shadow-sm"
+              className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-left text-xs font-medium text-zinc-600 shadow-sm transition hover:border-orange-300 hover:bg-orange-50 hover:text-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
             >
               {query}
             </button>
@@ -889,7 +889,7 @@ function AgentTab({
         <button
           type="button"
           onClick={onRunAgent}
-          className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+          className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
         >
           Run traveler query
         </button>
@@ -914,15 +914,15 @@ function AgentTab({
             </p>
           </div>
           {agentResult.assistantMessage ? (
-            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
-              <h3 className="text-sm font-semibold text-blue-950">
+            <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+              <h3 className="text-sm font-semibold text-zinc-950">
                 Grounded traveler response
               </h3>
-              <p className="mt-2 text-sm leading-6 text-blue-800">
+              <p className="mt-2 text-sm leading-6 text-zinc-600">
                 {agentResult.assistantMessage}
               </p>
               {agentResult.missingInformation?.length ? (
-                <div className="mt-3 text-sm leading-6 text-blue-800">
+                <div className="mt-3 text-sm leading-6 text-zinc-600">
                   <span className="font-medium">Missing information: </span>
                   {agentResult.missingInformation.join(", ")}
                 </div>
@@ -978,11 +978,11 @@ function AgentTab({
                 ))}
               </ul>
             </div>
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-              <h3 className="text-sm font-semibold text-blue-950">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+              <h3 className="text-sm font-semibold text-zinc-950">
                 Why direct booking is useful
               </h3>
-              <p className="mt-2 text-sm leading-6 text-blue-800">
+              <p className="mt-2 text-sm leading-6 text-zinc-600">
                 {agentResult.directBookingRationale}
               </p>
             </div>
@@ -990,7 +990,7 @@ function AgentTab({
           <button
             type="button"
             onClick={() => onCreateHandoff()}
-            className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
+            className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
           >
             {handoffStatus === "created"
               ? handoff?.handoffType === "booking_inquiry_handoff"
@@ -1021,18 +1021,30 @@ function AgentTab({
   );
 }
 
-function MetricsTab({ metrics }: { metrics: ReturnType<typeof calculateMetrics> }) {
+function MetricsTab({
+  metrics,
+  agentMatchCount,
+  handoffCount,
+}: {
+  metrics: ReturnType<typeof calculateMetrics>;
+  agentMatchCount: number;
+  handoffCount: number;
+}) {
   return (
     <div className="grid gap-4">
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-900">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm font-medium text-zinc-700">
         Audit scope: all 3 hotel knowledge graphs in this single-session demo.
       </div>
       <MetricsTiles metrics={metrics} />
+      <OaasPricingDemo
+        agentMatchCount={agentMatchCount}
+        handoffCount={handoffCount}
+      />
       <RecommendedNextActions />
       <Panel
         eyebrow="Outcome proxy"
         title="AI Discovery Share definition"
-        description="In this demo, AI Discovery Readiness is a proxy metric. In production, this becomes AI Discovery Share: the percentage of monitored traveler-intent prompts where tripla-powered hotel surfaces are cited, accurately described, and linked as direct-bookable sources."
+        description="In this demo, AI Discovery Readiness is a proxy metric. In production, this becomes AI Discovery Share: the percentage of monitored traveler-intent prompts where trpl-powered hotel surfaces are cited, accurately described, and linked as direct-bookable sources."
       >
         <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -1055,15 +1067,97 @@ function MetricsTab({ metrics }: { metrics: ReturnType<typeof calculateMetrics> 
   );
 }
 
-function StructuredUpdateCard({
-  update,
-  onApprove,
+function OaasPricingDemo({
+  agentMatchCount,
+  handoffCount,
 }: {
-  update: LiveLocalUpdate;
-  onApprove: () => void;
+  agentMatchCount: number;
+  handoffCount: number;
 }) {
+  const discoveryValue = agentMatchCount * 17;
+  const handoffValue = handoffCount * 290;
+
   return (
-    <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+    <Panel
+      eyebrow="Outcome-as-a-Service"
+      title="Outcome-as-a-Service (OaaS) Pricing Demo"
+      description="Synthetic unit economics that make outcome pricing concrete during review."
+    >
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-sm font-semibold text-zinc-950">
+            AI Discovery & Referral Outcomes
+          </p>
+          <p className="mt-3 text-2xl font-semibold tracking-tight text-zinc-950">
+            {agentMatchCount} matches · {formatYen(discoveryValue)}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-600">
+            Demonstration tier — billed per AI-discovery match where a
+            trpl-powered hotel surface is cited and linked.
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-sm font-semibold text-zinc-950">
+            Booking Handoff Outcomes
+          </p>
+          <p className="mt-3 text-2xl font-semibold tracking-tight text-zinc-950">
+            {handoffCount} handoffs · {formatYen(handoffValue)}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-600">
+            Demonstration tier — billed per verified direct-booking handoff
+            initiated through the agent layer.
+          </p>
+        </div>
+      </div>
+      <p className="mt-4 text-sm leading-6 text-zinc-600">
+        In this demo, OaaS is illustrated with two synthetic outcome tiers:
+        ¥17 per AI-discovery match and ¥290 per booking handoff. In production,
+        OaaS pricing would be a hybrid model: base subscription for platform
+        access plus outcome kickers on attributable workflows such as recovered
+        bookings, direct conversions, and pre-stay upsell. These two demo tiers
+        make the OaaS unit economics tangible during review, alongside any
+        existing transactional commissions.
+      </p>
+    </Panel>
+  );
+}
+
+function SelectedHotelFacts({ hotel }: { hotel: HotelGraph }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+            Selected hotel facts
+          </p>
+          <h3 className="mt-2 text-base font-semibold text-zinc-950">
+            {hotel.name}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-zinc-600">
+            {hotel.shortDescription}
+          </p>
+        </div>
+        <span className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
+          Current hotel context
+        </span>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {hotel.amenities.slice(0, 6).map((amenity) => (
+          <span
+            key={amenity}
+            className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-600"
+          >
+            {amenity}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StructuredUpdatePreview({ update }: { update: LiveLocalUpdate }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
@@ -1109,85 +1203,131 @@ function StructuredUpdateCard({
           Reputation-sensitive update: traveler-facing copy sanitized.
         </div>
       ) : null}
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
-            EN preview
-          </p>
-          <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.en}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
-            JA preview
-          </p>
-          <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.ja}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
-            KO preview
-          </p>
-          <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.ko}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
-            Traditional Chinese preview
-          </p>
-          <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.zhTW}</p>
-        </div>
+      <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-4">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+          Traveler-facing summary
+        </p>
+        <p className="mt-2 text-sm leading-6 text-zinc-700">
+          {update.travelerFacingSummary}
+        </p>
       </div>
-      <JsonViewer value={update} title="Structured update JSON" />
-      <button
-        type="button"
-        onClick={() => onApprove()}
-        disabled={update.status === "approved"}
-        className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {update.riskLevel === "high" ? "Approve high-risk update" : "Approve update"}
-      </button>
     </div>
   );
 }
 
-function AuditLog({ entries }: { entries: AuditLogEntry[] }) {
+function MultilingualPreview({ update }: { update: LiveLocalUpdate }) {
   return (
-    <Panel
-      eyebrow="Audit log"
-      title="Session log"
-      description="In-memory session log. It clears on refresh or Reset Demo."
-    >
-      {entries.length === 0 ? (
-        <p className="text-sm leading-6 text-zinc-600">No approved updates yet.</p>
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-zinc-200">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-zinc-50 text-xs uppercase tracking-[0.12em] text-zinc-500">
-              <tr>
-                <th className="px-3 py-2">Time</th>
-                <th className="px-3 py-2">Hotel</th>
-                <th className="px-3 py-2">Category</th>
-                <th className="px-3 py-2">Risk</th>
-                <th className="px-3 py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-200">
-              {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td className="px-3 py-2 font-mono text-xs text-zinc-600">
-                    {entry.timestamp}
-                  </td>
-                  <td className="px-3 py-2 text-zinc-700">{entry.hotel}</td>
-                  <td className="px-3 py-2 text-zinc-700">{entry.category}</td>
-                  <td className="px-3 py-2 text-zinc-700">{entry.riskLevel}</td>
-                  <td className="px-3 py-2 text-zinc-700">
-                    {entry.status} by {entry.approvedBy}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="grid gap-3 md:grid-cols-2">
+      <div className="rounded-lg border border-zinc-200 bg-white p-4">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+          EN preview
+        </p>
+        <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.en}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+          JA preview
+        </p>
+        <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.ja}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+          KO preview
+        </p>
+        <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.ko}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+          Traditional Chinese preview
+        </p>
+        <p className="mt-2 text-sm leading-6 text-zinc-700">{update.preview.zhTW}</p>
+      </div>
+    </div>
+  );
+}
+
+function AuditLogTable({ entries }: { entries: AuditLogEntry[] }) {
+  if (entries.length === 0) {
+    return (
+      <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm leading-6 text-zinc-600">
+        No approved updates yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-zinc-50 text-xs uppercase tracking-[0.12em] text-zinc-500">
+          <tr>
+            <th className="px-3 py-2">Time</th>
+            <th className="px-3 py-2">Hotel</th>
+            <th className="px-3 py-2">Category</th>
+            <th className="px-3 py-2">Risk</th>
+            <th className="px-3 py-2">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-200">
+          {entries.map((entry) => (
+            <tr key={entry.id}>
+              <td className="px-3 py-2 font-mono text-xs text-zinc-600">
+                {entry.timestamp}
+              </td>
+              <td className="px-3 py-2 text-zinc-700">{entry.hotel}</td>
+              <td className="px-3 py-2 text-zinc-700">{entry.category}</td>
+              <td className="px-3 py-2 text-zinc-700">{entry.riskLevel}</td>
+              <td className="px-3 py-2 text-zinc-700">
+                {entry.status} by {entry.approvedBy}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function BehindTheScenes({
+  update,
+  auditLog,
+}: {
+  update: LiveLocalUpdate | null;
+  auditLog: AuditLogEntry[];
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+      <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+        Behind the scenes — visible in the demo only
+      </p>
+      <p className="mt-2 text-sm leading-6 text-zinc-600">
+        These structured artifacts are normally hidden from the hotel operator.
+        They are surfaced here so reviewers can see what the system extracts,
+        stores, and audits.
+      </p>
+      <div className="mt-4 space-y-4">
+        {update ? (
+          <>
+            <JsonViewer value={update} title="Structured Update JSON" />
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-zinc-950">
+                Multilingual preview
+              </h3>
+              <MultilingualPreview update={update} />
+            </div>
+          </>
+        ) : (
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm leading-6 text-zinc-600">
+            Extract an update to see the structured JSON and language preview.
+          </div>
+        )}
+        <div>
+          <h3 className="mb-3 text-sm font-semibold text-zinc-950">
+            Audit log · session-only
+          </h3>
+          <AuditLogTable entries={auditLog} />
         </div>
-      )}
-    </Panel>
+      </div>
+    </div>
   );
 }
 
@@ -1212,9 +1352,18 @@ function BookingIntentCard({ intent }: { intent: BookingIntent }) {
         <Fact label="Selected hotel" value={intent.hotelName} />
         <Fact label="Check-in" value={intent.checkInDate} />
         <Fact label="Check-out" value={intent.checkOutDate} />
+        <Fact label="Guests" value={`${intent.guests} total`} />
+        <Fact label="Adults" value={`${intent.adults}`} />
+        <Fact label="Children" value={`${intent.children}`} />
+        <Fact label="Pets" value={`${intent.pets}`} />
+        <Fact label="Bed configuration" value={intent.bedConfiguration} />
         <Fact
-          label="Party"
-          value={`${intent.adults} adults, ${intent.children} children, ${intent.pets} pets`}
+          label="Handoff type"
+          value={
+            intent.handoffType === "booking_inquiry_handoff"
+              ? "Inquiry handoff"
+              : "Verified handoff"
+          }
         />
         <Fact label="Room type" value={intent.roomType} />
         <Fact
@@ -1228,6 +1377,12 @@ function BookingIntentCard({ intent }: { intent: BookingIntent }) {
         <Fact label="Availability" value={intent.availabilityNote} />
         <Fact label="Live/local update used" value={intent.liveLocalUpdateUsed} />
       </div>
+      {!intent.availabilityVerified ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+          Availability for requested dates is not verified in the mock graph.
+          Rate unavailable in mock graph for requested dates.
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1250,6 +1405,7 @@ function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
           <QRCodeCanvas value={handoff.bookingUrl} size={180} includeMargin />
         </div>
         <div className="space-y-3">
+          <Fact label="Selected hotel" value={handoff.hotelName} />
           <Fact label="Room" value={handoff.roomType} />
           <Fact label="Check-in" value={handoff.checkInDate} />
           <Fact label="Check-out" value={handoff.checkOutDate} />
@@ -1263,7 +1419,15 @@ function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
               handoff.rateYen
                 ? `¥${handoff.rateYen.toLocaleString()}`
                 : "Rate unavailable in mock graph for requested dates."
-            }
+              }
+            />
+          <Fact
+            label="Bed configuration"
+            value={handoff.bedConfiguration ?? "not specified"}
+          />
+          <Fact
+            label="Handoff type"
+            value={isInquiry ? "Booking inquiry handoff" : "Verified handoff"}
           />
           <Fact
             label="Availability status"
@@ -1283,7 +1447,7 @@ function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
             </p>
             <a
               href={handoff.bookingUrl}
-              className="mt-2 block break-all font-mono text-xs text-blue-700"
+              className="mt-2 block break-all font-mono text-xs text-orange-700"
             >
               {handoff.bookingUrl}
             </a>
@@ -1437,7 +1601,7 @@ function McpToolsPanel() {
       title="Agent Tool Layer Simulation"
       description="These demo API routes simulate the tools an AI agent would call. In production they would become standards-compliant MCP/UCP adapters."
     >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2">
         {tools.map((tool) => (
           <div
             key={tool.name}
@@ -1454,13 +1618,13 @@ function McpToolsPanel() {
             <p className="mt-2 text-sm leading-6 text-zinc-600">
               {tool.description}
             </p>
-            <p className="mt-3 break-all font-mono text-xs text-blue-700">
+            <p className="mt-3 break-all font-mono text-xs text-orange-700">
               {tool.path}
             </p>
             <button
               type="button"
               onClick={() => runTool(tool)}
-              className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-zinc-950 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+              className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-orange-500 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
             >
               Run {tool.name}
             </button>
@@ -1504,7 +1668,7 @@ function Panel({
 }) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-[0.16em] text-blue-600">
+      <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
         {eyebrow}
       </p>
       <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-950">
@@ -1587,7 +1751,7 @@ function GraphCards({ hotel }: { hotel: HotelGraph }) {
                 {item.includes("New in this session") ? (
                   <>
                     {item.replace(" · New in this session", "")}{" "}
-                    <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200">
+                    <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200">
                       New in this session
                     </span>
                   </>
@@ -1627,7 +1791,7 @@ function Guardrails() {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
       <div className="flex items-center gap-2">
-        <Braces className="h-4 w-4 text-blue-600" />
+        <Braces className="h-4 w-4 text-zinc-500" />
         <h2 className="text-sm font-semibold text-zinc-950">Visible guardrails</h2>
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -1636,7 +1800,7 @@ function Guardrails() {
             key={guardrail}
             className="flex items-start gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600"
           >
-            <MapPin className="mt-0.5 h-3.5 w-3.5 text-blue-600" />
+            <MapPin className="mt-0.5 h-3.5 w-3.5 text-zinc-500" />
             <span>{guardrail}</span>
           </div>
         ))}

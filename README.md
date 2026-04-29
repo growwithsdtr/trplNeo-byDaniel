@@ -1,8 +1,8 @@
 # triplaNeoByDaniel
 
-Agentic Direct Booking Infrastructure for the AI Travel Era
+Agentic Hotel Discovery & Direct Booking for the AI Travel Era
 
-Powered by a Live & Local Hotel Knowledge Graph
+Repository naming and product references in this README are intentionally generic. This is a take-home prototype intended for live-URL review.
 
 Demo by Daniel Jimenez · Synthetic data · Senior PM Gen AI take-home prototype
 
@@ -17,7 +17,7 @@ Demo by Daniel Jimenez · Synthetic data · Senior PM Gen AI take-home prototype
 
 The core product thesis:
 
-Live & local hotel knowledge -> AI discoverability -> verified direct booking handoff
+Live & local hotel knowledge enriched at source -> Enhanced AI hotel discoverability -> Higher conversion with verified direct booking handoff
 
 The demo shows that a hotel-owned, standards-aligned knowledge graph can be enriched by operators with fresh, local, time-sensitive information, then used by a traveler-facing AI agent to produce direct-bookable recommendations.
 
@@ -53,53 +53,32 @@ If AI agents become a major travel discovery layer, hotels risk being represente
 ## What is simulated
 
 - PMS/channel availability.
-- tripla Book, Bot, Connect, Pay, CRM, and PMS enrichment.
+- trpl Book, trpl Bot, trpl Connect, trpl Pay, CRM, and PMS enrichment.
 - MCP/UCP/AP2 production integrations.
-- triplaPay/GMO payment execution.
+- trplPay/PSP payment execution.
 - Real crawler ingestion.
 - Voice transcription.
-- Proprietary tripla data.
+- Proprietary company data.
 
 ## 90-second demo script
 
 1. Open the app and click **Start Demo Tour**.
 2. Select **Nikko Cedar Ryokan**.
-3. In the Hotel Operator & Okami-san（女将） console, use the example update: “Tomorrow the outdoor onsen will have yuzu aroma.”
+3. In the Hotel Operator Console — Live & Local Updates tab, use the example update: “Tomorrow the outdoor onsen will have yuzu aroma.”
 4. Extract the structured update and point out category, affected date, source, confidence, risk, and approval status.
 5. Approve the update and show the audit log entry.
 6. Move to the Knowledge Graph tab and show that the live/local update is now part of the hotel-owned graph.
 7. Open the Schema.org JSON-LD preview, copy it, and use the validator affordance if desired.
-8. Move to Metrics and show AI Discovery Readiness and Freshness improving.
-9. Run the traveler query: “I want a quiet ryokan in Nikko this weekend with onsen, local food, and a special experience.”
+8. Move to the Traveler AI Agent — Discovery to Booking tab.
+9. Run the traveler query: “I want a quiet ryokan this weekend with onsen for me and my wife in one big bed.”
 10. Show that the traveler agent cites **Source: Hotel Knowledge Graph**, searches across all three hotel graphs, and uses the yuzu aroma update.
 11. Generate the direct booking handoff and show the booking summary, dummy link, QR code, and potential direct GMV.
-12. Close by emphasizing that payment is intentionally out of scope; the milestone is AI discovery -> verified quote -> direct booking handoff.
-
-## Local run instructions
-
-```bash
-npm install
-npm run dev
-```
-
-Open http://localhost:3000.
-
-Validate before sharing:
-
-```bash
-npm run lint
-npm run build
-```
+12. Move to Metrics, Audit & Agent Tools to show readiness, OaaS counters, and the interactive tool-layer simulation.
+13. Close by emphasizing that payment is intentionally out of scope; the milestone is AI discovery -> verified quote -> direct booking handoff.
 
 ## Deployment instructions
 
-Recommended deployment target: Vercel.
-
-```bash
-npm run build
-vercel
-vercel --prod
-```
+Recommended deployment target: Vercel. Reviewers should primarily use the live URL above.
 
 Environment variables are optional:
 
@@ -157,7 +136,7 @@ Additional production metrics:
 - Structured Data Completeness
 - Agent Match Rate
 
-In this demo, AI Discovery Readiness is a proxy metric. In production, this becomes AI Discovery Share: the percentage of monitored traveler-intent prompts where tripla-powered hotel surfaces are cited, accurately described, and linked as direct-bookable sources.
+In this demo, AI Discovery Readiness is a proxy metric. In production, this becomes AI Discovery Share: the percentage of monitored traveler-intent prompts where trpl-powered hotel surfaces are cited, accurately described, and linked as direct-bookable sources.
 
 ## Strategic roadmap
 
@@ -171,8 +150,8 @@ In this demo, AI Discovery Readiness is a proxy metric. In production, this beco
 ## What this demo deliberately does not do — and why
 
 - No crawler: because crawling is an ingestion method, not the strategic moat.
-- No real PMS/tripla integration: this is a synthetic demo only.
-- No real payment: payment belongs to triplaPay/GMO integration.
+- No real PMS/trpl integration: this is a synthetic demo only.
+- No real payment: payment belongs to trplPay/PSP integration.
 - No real UCP/AP2: protocols are emerging; demo focuses on quote/handoff first.
 - No full guardrail engine: demo uses visible simple guardrails.
 

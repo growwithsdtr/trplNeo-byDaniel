@@ -421,8 +421,10 @@ export const updateExamples = [
 ];
 
 export const travelerQueryExamples = [
-  "I want a quiet ryokan in Nikko this weekend with onsen, local food, and a special experience.",
-  "Find me a pet-friendly hotel in Nikko where I can bring a small dog.",
-  "I need a business hotel in Nikko with fast Wi-Fi and HDMI for a presentation.",
-  "I want an activity-based stay near Lake Chuzenji this Saturday.",
+  "I want a quiet ryokan this weekend with onsen for me and my wife in one big bed.",
+  "Find a pet-friendly hotel for me, my wife, two kids, and two pets, for New Year’s Eve.",
+  "Business hotel with verified Wi-Fi for two business travelers, two separate beds, the second week of next month.",
+  "Activity stay near Lake Chuzenji for me and my four children, during Golden Week.",
+  "Show me the hotel that has any concert this weekend for two.",
+  "Onsen ryokan for tomorrow night, just me.",
 ];

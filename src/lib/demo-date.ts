@@ -8,6 +8,18 @@ export const DEMO_WEEKEND = {
   checkInDate: "2026-05-02",
   checkOutDate: "2026-05-03",
 };
+export const DEMO_NEXT_WEEKEND = {
+  checkInDate: "2026-05-09",
+  checkOutDate: "2026-05-10",
+};
+export const DEMO_SECOND_WEEK_NEXT_MONTH = {
+  checkInDate: "2026-05-08",
+  checkOutDate: "2026-05-14",
+};
+export const DEMO_GOLDEN_WEEK = {
+  checkInDate: "2026-04-29",
+  checkOutDate: "2026-05-05",
+};
 export const DEMO_NEW_YEAR_NIGHT = {
   checkInDate: "2026-12-31",
   checkOutDate: "2027-01-01",

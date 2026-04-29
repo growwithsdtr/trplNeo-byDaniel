@@ -33,7 +33,7 @@ export function DemoTour({
     <div className="fixed bottom-6 right-6 z-50 w-[min(420px,calc(100vw-32px))] rounded-lg border border-zinc-200 bg-white p-4 shadow-2xl">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-blue-600">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
             90-second demo tour · Step {step + 1} of {steps.length}
           </p>
           <h2 className="mt-2 text-base font-semibold text-zinc-950">
@@ -63,7 +63,7 @@ export function DemoTour({
         <button
           type="button"
           onClick={onNext}
-          className="inline-flex h-9 items-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-medium text-white transition hover:bg-zinc-800"
+          className="inline-flex h-9 items-center gap-2 rounded-md bg-orange-500 px-3 text-sm font-medium text-white transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
         >
           {step === steps.length - 1 ? "Finish" : "Next"}
           <ArrowRight className="h-4 w-4" />

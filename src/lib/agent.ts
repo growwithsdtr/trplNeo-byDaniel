@@ -72,9 +72,17 @@ function scoreHotel(query: string, hotel: HotelGraph) {
     "breakfast",
   ]);
   const wantsPet = hasAny(query, ["dog", "pet", "pets"]);
-  const wantsFamily = hasAny(query, ["kid", "kids", "child", "children", "family"]);
+  const wantsFamily = hasAny(query, [
+    "kid",
+    "kids",
+    "child",
+    "children",
+    "family",
+    "golden week",
+  ]);
   const wantsConcert = hasAny(query, ["concert", "shamisen", "samizen", "shamizen"]);
   const wantsRyokan = hasAny(query, ["ryokan", "onsen", "local food", "kaiseki"]);
+  const wantsActivity = hasAny(query, ["activity", "activities", "lake chuzenji", "cycling", "hiking"]);
 
   if (wantsBusiness) {
     if (hotel.type.includes("business")) score += 18;
@@ -90,6 +98,9 @@ function scoreHotel(query: string, hotel: HotelGraph) {
   }
   if (wantsFamily && (text.includes("family") || text.includes("children"))) {
     score += 10;
+  }
+  if (wantsActivity && (text.includes("lake cycling") || text.includes("hiking") || text.includes("lake chuzenji"))) {
+    score += 16;
   }
   if (wantsConcert) {
     const approvedConcert = hotel.liveLocalUpdates.some((update) => {
@@ -132,7 +143,7 @@ function relevantUpdates(query: string, hotel: HotelGraph) {
 
 function chooseRoom(query: string, hotel: HotelGraph) {
   const q = query.toLowerCase();
-  if (hasAny(q, ["kid", "kids", "child", "children", "family"])) {
+  if (hasAny(q, ["kid", "kids", "child", "children", "family", "golden week"])) {
     const familyRoom = hotel.roomTypes.find((room) =>
       room.name.toLowerCase().includes("family")
     );
@@ -144,7 +155,13 @@ function chooseRoom(query: string, hotel: HotelGraph) {
     );
     if (petRoom) return petRoom;
   }
-  if (hasAny(q, ["wife", "husband", "partner", "two"])) {
+  if (hasAny(q, ["two separate beds", "twin beds"])) {
+    const twinRoom = hotel.roomTypes.find((room) =>
+      room.name.toLowerCase().includes("twin")
+    );
+    if (twinRoom) return twinRoom;
+  }
+  if (hasAny(q, ["wife", "husband", "partner", "two", "one big bed"])) {
     const twinOrSuite = hotel.roomTypes.find((room) =>
       hasAny(room.name.toLowerCase(), ["twin", "suite", "washitsu"])
     );
@@ -164,6 +181,9 @@ function selectionReasonFor(query: string, hotel: HotelGraph, updates: LiveLocal
   }
   if (hasAny(q, ["business", "presentation", "wifi", "wi-fi", "hdmi"])) {
     return `${hotel.name} was selected because the graph includes business-traveler fit signals such as verified Wi-Fi, HDMI, workspace, late check-in, laundry, and breakfast.`;
+  }
+  if (hasAny(q, ["activity", "lake chuzenji", "golden week"])) {
+    return `${hotel.name} was selected because the graph includes activity, family, and Lake Chuzenji fit signals.`;
   }
   if (hasAny(q, ["pet", "dog", "pets", "kids", "children", "family"])) {
     return `${hotel.name} was selected because the graph includes pet and family policies that best match the traveler intent.`;
@@ -187,6 +207,13 @@ function matchingCriteriaFor(query: string, hotel: HotelGraph, updates: LiveLoca
   }
   if (hasAny(q, ["concert", "shamisen", "samizen", "shamizen"]) && updates.length > 0) {
     return [hotel.type, "Approved live/local event update", updates[0].title];
+  }
+  if (hasAny(q, ["activity", "lake chuzenji", "golden week"])) {
+    return [
+      hotel.type,
+      ...hotel.localActivities.slice(0, 2).map((activity) => activity.name),
+      ...hotel.policies.slice(0, 1),
+    ];
   }
   if (hasAny(q, ["pet", "dog", "pets", "kids", "children", "family"])) {
     return [hotel.type, ...hotel.petPolicyDetails.slice(0, 2), ...hotel.policies.slice(0, 1)];

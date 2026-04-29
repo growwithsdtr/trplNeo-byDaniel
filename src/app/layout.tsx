@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "triplaNeoByDaniel",
+  title: "triplaNeo (by Daniel)",
   description:
-    "Agentic Direct Booking Infrastructure for the AI Travel Era",
+    "Agentic Hotel Discovery & Direct Booking for the AI Travel Era",
 };
 
 export default function RootLayout({

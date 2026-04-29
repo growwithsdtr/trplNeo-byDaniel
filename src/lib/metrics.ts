@@ -25,9 +25,5 @@ export function calculateMetrics(
 }
 
 export function formatYen(value: number) {
-  return new Intl.NumberFormat("ja-JP", {
-    style: "currency",
-    currency: "JPY",
-    maximumFractionDigits: 0,
-  }).format(value);
+  return `¥${value.toLocaleString("ja-JP")}`;
 }
