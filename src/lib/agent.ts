@@ -23,6 +23,16 @@ function hasAny(text: string, terms: string[]) {
   return terms.some((term) => text.includes(term));
 }
 
+const semanticUpdateGroups = [
+  ["surf", "surfing", "surfboard", "surfboards", "wakeboard", "wakeboards", "water gear", "lake"],
+  ["jazz", "concert"],
+  ["shamisen", "samizen", "shamizen", "concert"],
+  ["culinary", "gourmet", "washoku", "french", "chinese cuisine", "food lovers"],
+  ["wi-fi", "wifi", "hdmi", "business", "presentation"],
+  ["onsen", "kaiseki", "ryokan", "private bath"],
+  ["pet", "pets", "dog", "dogs"],
+];
+
 function hotelSearchText(hotel: HotelGraph) {
   return [
     hotel.name,
@@ -45,6 +55,42 @@ function hotelSearchText(hotel: HotelGraph) {
     .toLowerCase();
 }
 
+function approvedUpdateText(update: LiveLocalUpdate) {
+  return [
+    update.category,
+    update.title,
+    update.travelerFacingSummary,
+    update.affectedRoomTypes.join(" "),
+    update.affectedOffer ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function liveLocalUpdateMatchScore(query: string, hotel: HotelGraph) {
+  const approvedUpdates = hotel.liveLocalUpdates.filter(
+    (update) => update.status === "approved"
+  );
+  let score = 0;
+
+  for (const update of approvedUpdates) {
+    const updateText = approvedUpdateText(update);
+    const queryTerms = query
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length > 3);
+    if (queryTerms.some((term) => updateText.includes(term))) {
+      score += 28;
+    }
+    for (const group of semanticUpdateGroups) {
+      if (hasAny(query, group) && hasAny(updateText, group)) {
+        score += 60;
+      }
+    }
+  }
+
+  return score;
+}
+
 function scoreHotel(query: string, hotel: HotelGraph) {
   const text = hotelSearchText(hotel);
 
@@ -57,6 +103,7 @@ function scoreHotel(query: string, hotel: HotelGraph) {
     (total, term) => total + (text.includes(term) ? 1 : 0),
     0
   );
+  score += liveLocalUpdateMatchScore(query, hotel);
 
   const wantsBusiness = hasAny(query, [
     "business",
@@ -80,9 +127,20 @@ function scoreHotel(query: string, hotel: HotelGraph) {
     "family",
     "golden week",
   ]);
-  const wantsConcert = hasAny(query, ["concert", "shamisen", "samizen", "shamizen"]);
+  const wantsConcert = hasAny(query, ["concert", "shamisen", "samizen", "shamizen", "jazz"]);
   const wantsRyokan = hasAny(query, ["ryokan", "onsen", "local food", "kaiseki"]);
-  const wantsActivity = hasAny(query, ["activity", "activities", "lake chuzenji", "cycling", "hiking"]);
+  const wantsActivity = hasAny(query, [
+    "activity",
+    "activities",
+    "lake chuzenji",
+    "cycling",
+    "hiking",
+    "surf",
+    "surfing",
+    "surfboard",
+    "wakeboard",
+    "water gear",
+  ]);
 
   if (wantsBusiness) {
     if (hotel.type.includes("business")) score += 18;
@@ -104,8 +162,8 @@ function scoreHotel(query: string, hotel: HotelGraph) {
   }
   if (wantsConcert) {
     const approvedConcert = hotel.liveLocalUpdates.some((update) => {
-      const updateText = `${update.category} ${update.title} ${update.travelerFacingSummary}`.toLowerCase();
-      return update.status === "approved" && hasAny(updateText, ["concert", "shamisen"]);
+      const updateText = approvedUpdateText(update);
+      return update.status === "approved" && hasAny(updateText, ["concert", "shamisen", "jazz"]);
     });
     if (approvedConcert) score += 42;
   }
@@ -120,19 +178,19 @@ function scoreHotel(query: string, hotel: HotelGraph) {
 
 function relevantUpdates(query: string, hotel: HotelGraph) {
   const q = query.toLowerCase();
-  const wantsConcert = hasAny(q, ["concert", "shamisen", "samizen", "shamizen"]);
+  const wantsConcert = hasAny(q, ["concert", "shamisen", "samizen", "shamizen", "jazz"]);
   return hotel.liveLocalUpdates
     .filter((update) => update.status === "approved")
     .filter((update) => {
-      const updateText = [
-        update.category,
-        update.travelerFacingSummary,
-        update.affectedRoomTypes.join(" "),
-        update.affectedOffer ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      if (wantsConcert && hasAny(updateText, ["concert", "shamisen"])) return true;
+      const updateText = approvedUpdateText(update);
+      if (wantsConcert && hasAny(updateText, ["concert", "shamisen", "jazz"])) return true;
+      if (
+        semanticUpdateGroups.some(
+          (group) => hasAny(q, group) && hasAny(updateText, group)
+        )
+      ) {
+        return true;
+      }
       return q
         .split(/[^a-z0-9]+/)
         .filter((term) => term.length > 3)
@@ -176,8 +234,8 @@ function chooseRoom(query: string, hotel: HotelGraph) {
 
 function selectionReasonFor(query: string, hotel: HotelGraph, updates: LiveLocalUpdate[]) {
   const q = query.toLowerCase();
-  if (hasAny(q, ["concert", "shamisen", "samizen", "shamizen"]) && updates.length > 0) {
-    return `${hotel.name} was selected because its approved live/local updates match the requested concert experience.`;
+  if (updates.length > 0) {
+    return `${hotel.name} was selected because an approved live/local update directly matches the traveler intent: ${updates[0].title}.`;
   }
   if (hasAny(q, ["business", "presentation", "wifi", "wi-fi", "hdmi"])) {
     return `${hotel.name} was selected because the graph includes business-traveler fit signals such as verified Wi-Fi, HDMI, workspace, late check-in, laundry, and breakfast.`;
@@ -196,6 +254,9 @@ function selectionReasonFor(query: string, hotel: HotelGraph, updates: LiveLocal
 
 function matchingCriteriaFor(query: string, hotel: HotelGraph, updates: LiveLocalUpdate[]) {
   const q = query.toLowerCase();
+  if (updates.length > 0) {
+    return [hotel.type, "Approved live/local update", updates[0].title];
+  }
   if (hasAny(q, ["business", "presentation", "wifi", "wi-fi", "hdmi"])) {
     return [
       hotel.type,

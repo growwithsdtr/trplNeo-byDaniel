@@ -31,14 +31,19 @@ function isRiskLevel(value: unknown): value is RiskLevel {
   return typeof value === "string" && riskLevels.includes(value as RiskLevel);
 }
 
+function shouldUseDeterministicOnly(fallback: LiveLocalUpdate) {
+  return (
+    fallback.reputationSensitive ||
+    fallback.category === "local_event" ||
+    fallback.title === "Water gear activity update"
+  );
+}
+
 function normalizeOpenAiUpdate(
   parsed: Record<string, unknown>,
   fallback: LiveLocalUpdate
 ): LiveLocalUpdate {
-  if (
-    fallback.reputationSensitive ||
-    (fallback.category === "local_event" && fallback.title === "Shamisen concert")
-  ) {
+  if (shouldUseDeterministicOnly(fallback)) {
     return fallback;
   }
 
@@ -84,14 +89,18 @@ function normalizeOpenAiUpdate(
   return {
     ...fallback,
     category: isCategory(parsed.category) ? parsed.category : fallback.category,
-    affectedDates: Array.isArray(parsed.affectedDates)
-      ? parsed.affectedDates.filter((item): item is string => typeof item === "string")
-      : fallback.affectedDates,
-    affectedRoomTypes: Array.isArray(parsed.affectedRoomTypes)
-      ? parsed.affectedRoomTypes.filter(
-          (item): item is string => typeof item === "string"
-        )
-      : fallback.affectedRoomTypes,
+    affectedDates:
+      Array.isArray(parsed.affectedDates) &&
+      parsed.affectedDates.some((item) => typeof item === "string")
+        ? parsed.affectedDates.filter((item): item is string => typeof item === "string")
+        : fallback.affectedDates,
+    affectedRoomTypes:
+      Array.isArray(parsed.affectedRoomTypes) &&
+      parsed.affectedRoomTypes.some((item) => typeof item === "string")
+        ? parsed.affectedRoomTypes.filter(
+            (item): item is string => typeof item === "string"
+          )
+        : fallback.affectedRoomTypes,
     affectedOffer:
       typeof parsed.affectedOffer === "string"
         ? parsed.affectedOffer
@@ -99,16 +108,16 @@ function normalizeOpenAiUpdate(
     priceImpact,
     travelerFacingSummary,
     internalNotes:
-      typeof parsed.internalNotes === "string"
+      typeof parsed.internalNotes === "string" && parsed.internalNotes.trim()
         ? parsed.internalNotes
-        : "OpenAI structured extraction with deterministic fallback available.",
+        : fallback.internalNotes,
     riskLevel,
     requiresApproval,
     confidence:
       typeof parsed.confidence === "number" ? parsed.confidence : fallback.confidence,
     preview: {
       ja:
-        typeof parsed.jaPreview === "string"
+        typeof parsed.jaPreview === "string" && parsed.jaPreview.trim()
           ? parsed.jaPreview
           : fallback.preview.ja,
       en: travelerFacingSummary,
@@ -126,7 +135,7 @@ export async function POST(request: Request) {
     baselineHotels[0];
   const fallback = deterministicExtractUpdate(input, hotel);
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.OPENAI_API_KEY || shouldUseDeterministicOnly(fallback)) {
     return NextResponse.json({
       provider: "deterministic",
       update: fallback,

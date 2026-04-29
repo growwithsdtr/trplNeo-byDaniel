@@ -418,6 +418,10 @@ export const updateExamples = [
     label: "Guest insight",
     text: "Many Korean guests ask about vegetarian breakfast; mark vegetarian breakfast as available with advance notice.",
   },
+  {
+    label: "Culinary event",
+    text: "A selection of chefs will feature their latest culinary dishes, awarded by Michelin Guide. This is a not-to-miss event with washoku, French and Chinese cuisine. Book early. For food lovers and gourmets, a delightful event.",
+  },
 ];
 
 export const travelerQueryExamples = [

@@ -24,6 +24,7 @@ import {
   DEMO_DATE_CONTEXT,
   DEMO_HANDOFF_AT,
   DEMO_NOW,
+  DEMO_TIMEZONE_LABEL,
 } from "@/lib/demo-date";
 import { deterministicExtractUpdate } from "@/lib/extraction";
 import { parseTravelerIntent } from "@/lib/intent";
@@ -101,6 +102,9 @@ interface BookingIntent {
   children: number;
   pets: number;
   bedConfiguration: string;
+  stayLengthDays?: number;
+  stayLengthNights?: number;
+  dateInterpretationNote?: string;
   roomType: string;
   hotelName: string;
   estimatedRateYen?: number;
@@ -456,6 +460,9 @@ export default function Home() {
       children: intent.children,
       pets: intent.pets,
       bedConfiguration: intent.bedConfiguration,
+      stayLengthDays: intent.stayLengthDays,
+      stayLengthNights: intent.stayLengthNights,
+      dateInterpretationNote: intent.dateInterpretationNote,
       rateYen: intent.estimatedRateYen,
       handoffType: intent.handoffType,
       availabilityVerified: intent.availabilityVerified,
@@ -482,21 +489,19 @@ export default function Home() {
                 <Sparkles className="h-3.5 w-3.5" />
                 Demo by Daniel Jimenez
               </div>
-              <div className="mt-4 flex items-center gap-3">
+              <div className="mt-4 flex flex-col gap-3">
                 <Image
                   src="/triplaNeo-byDaniel-logo.png"
                   alt="triplaNeo by Daniel logo"
-                  width={60}
-                  height={40}
-                  className="h-10 w-auto rounded-md object-contain"
+                  width={260}
+                  height={173}
+                  priority
+                  className="h-auto w-56 rounded-md object-contain sm:w-64"
                 />
-                <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
-                  triplaNeo (by Daniel)
+                <h1 className="text-2xl font-semibold tracking-tight text-zinc-950 sm:text-3xl">
+                  triplaNeo - Agentic Hotel Discovery & Direct Booking for the AI Travel Era
                 </h1>
               </div>
-              <p className="mt-2 text-lg font-medium text-zinc-800">
-                Agentic Hotel Discovery & Direct Booking for the AI Travel Era
-              </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <button
@@ -600,7 +605,7 @@ export default function Home() {
         <footer className="flex flex-col gap-2 border-t border-zinc-200 py-4 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
           <p>Demo by Daniel Jimenez · Synthetic data · Senior PM Gen AI take-home prototype</p>
           <p>
-            Demo date context: {DEMO_DATE_CONTEXT} · Payment execution, PMS
+            Demo date context: {DEMO_DATE_CONTEXT} {DEMO_TIMEZONE_LABEL} · Payment execution, PMS
             integration, crawling, and production MCP are intentionally out of scope.
           </p>
         </footer>
@@ -739,7 +744,6 @@ function ConsoleTab({
           <BehindTheScenes update={structuredUpdate} auditLog={auditLog} />
         </div>
       </Panel>
-      <Guardrails />
     </div>
   );
 }
@@ -1172,6 +1176,8 @@ function StructuredUpdatePreview({ update }: { update: LiveLocalUpdate }) {
             className={`rounded-md px-2.5 py-1 text-xs font-medium ${
               update.riskLevel === "high"
                 ? "bg-amber-100 text-amber-800"
+                : update.riskLevel === "medium"
+                  ? "bg-yellow-100 text-yellow-800"
                 : "bg-emerald-100 text-emerald-800"
             }`}
           >
@@ -1191,6 +1197,12 @@ function StructuredUpdatePreview({ update }: { update: LiveLocalUpdate }) {
         {update.eventTime ? <Fact label="Event time" value={update.eventTime} /> : null}
         {update.bookingDeadline ? (
           <Fact label="Booking deadline" value={update.bookingDeadline} />
+        ) : null}
+        {update.eventLocation ? (
+          <Fact label="Event location" value={update.eventLocation} />
+        ) : null}
+        {update.repeatNote ? (
+          <Fact label="Repeat note" value={update.repeatNote} />
         ) : null}
         <Fact
           label="Affected rooms"
@@ -1295,14 +1307,14 @@ function BehindTheScenes({
   auditLog: AuditLogEntry[];
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+    <div className="rounded-lg border border-rose-200 bg-rose-50 p-4">
       <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
         Behind the scenes — visible in the demo only
       </p>
       <p className="mt-2 text-sm leading-6 text-zinc-600">
         These structured artifacts are normally hidden from the hotel operator.
         They are surfaced here so reviewers can see what the system extracts,
-        stores, and audits.
+        stores, audits, and blocks with simple guardrails.
       </p>
       <div className="mt-4 space-y-4">
         {update ? (
@@ -1326,6 +1338,7 @@ function BehindTheScenes({
           </h3>
           <AuditLogTable entries={auditLog} />
         </div>
+        <Guardrails />
       </div>
     </div>
   );
@@ -1358,6 +1371,16 @@ function BookingIntentCard({ intent }: { intent: BookingIntent }) {
         <Fact label="Pets" value={`${intent.pets}`} />
         <Fact label="Bed configuration" value={intent.bedConfiguration} />
         <Fact
+          label="Stay length"
+          value={
+            intent.stayLengthDays
+              ? `${intent.stayLengthDays} days`
+              : intent.stayLengthNights
+                ? `${intent.stayLengthNights} nights`
+                : "Not specified"
+          }
+        />
+        <Fact
           label="Handoff type"
           value={
             intent.handoffType === "booking_inquiry_handoff"
@@ -1381,6 +1404,11 @@ function BookingIntentCard({ intent }: { intent: BookingIntent }) {
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
           Availability for requested dates is not verified in the mock graph.
           Rate unavailable in mock graph for requested dates.
+        </div>
+      ) : null}
+      {intent.dateInterpretationNote ? (
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 text-sm leading-6 text-zinc-600">
+          {intent.dateInterpretationNote}
         </div>
       ) : null}
     </div>
@@ -1426,6 +1454,16 @@ function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
             value={handoff.bedConfiguration ?? "not specified"}
           />
           <Fact
+            label="Stay length"
+            value={
+              handoff.stayLengthDays
+                ? `${handoff.stayLengthDays} days`
+                : handoff.stayLengthNights
+                  ? `${handoff.stayLengthNights} nights`
+                  : "Not specified"
+            }
+          />
+          <Fact
             label="Handoff type"
             value={isInquiry ? "Booking inquiry handoff" : "Verified handoff"}
           />
@@ -1441,6 +1479,11 @@ function BookingHandoffCard({ handoff }: { handoff: BookingHandoff }) {
             label="Live/local update used"
             value={handoff.liveLocalUpdateUsed}
           />
+          {handoff.dateInterpretationNote ? (
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm leading-6 text-zinc-600">
+              {handoff.dateInterpretationNote}
+            </div>
+          ) : null}
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
               Dummy booking link
@@ -1468,24 +1511,39 @@ function RecommendedNextActions() {
       metric: "AI Discovery Readiness",
       action:
         "Add missing room policies, pet policy, multilingual summaries, and live/local updates.",
+      impact: "+8 AI Discovery Readiness",
     },
     {
       metric: "Freshness Score",
       action:
         "Ask operator to verify today’s bath schedule, meal availability, and local events.",
+      impact: "+6 Freshness Score",
     },
     {
       metric: "Direct Booking Handoff Count",
       action: "Test traveler prompts and ensure each hotel has bookable offers.",
+      impact: "+3 handoff opportunities",
     },
     {
       metric: "Incremental Direct GMV",
       action: "Add direct-only packages, upgrades, and seasonal offers.",
+      impact: "+¥12,000 GMV potential",
     },
     {
       metric: "Operator Time Saved",
       action:
         "Convert frequent bot questions into reusable structured answers.",
+      impact: "+5 Readiness / +20 min operator time saved",
+    },
+    {
+      metric: "Multilingual Coverage",
+      action: "Add multilingual summaries for high-intent room and policy questions.",
+      impact: "+7 AI Discovery Readiness",
+    },
+    {
+      metric: "Policy Completeness",
+      action: "Add pet, business, and family policy details for every hotel.",
+      impact: "+4 Readiness",
     },
   ];
 
@@ -1503,6 +1561,9 @@ function RecommendedNextActions() {
           >
             <p className="text-sm font-semibold text-zinc-950">{item.metric}</p>
             <p className="mt-2 text-sm leading-6 text-zinc-600">{item.action}</p>
+            <p className="mt-3 inline-flex rounded-md bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200">
+              Estimated demo impact: {item.impact}
+            </p>
           </div>
         ))}
       </div>

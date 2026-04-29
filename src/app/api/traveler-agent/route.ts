@@ -58,7 +58,9 @@ function extractOutputText(data: {
 
 function normalizeLlmResult(
   parsed: Record<string, unknown>,
-  fallback: TravelerAgentResult
+  fallback: TravelerAgentResult,
+  matchedHotel: HotelGraph,
+  hotels: HotelGraph[]
 ): TravelerAgentResult {
   const assistantMessage =
     typeof parsed.assistantMessage === "string"
@@ -75,10 +77,23 @@ function normalizeLlmResult(
   if (!assistantMessage || citedSource !== "Source: Hotel Knowledge Graph") {
     throw new Error("Malformed LLM traveler-agent response");
   }
+  const mentionedOtherHotel = hotels.some(
+    (hotel) =>
+      hotel.id !== matchedHotel.id &&
+      assistantMessage.toLowerCase().includes(hotel.name.toLowerCase())
+  );
+  if (mentionedOtherHotel) {
+    throw new Error("LLM response recommended a different hotel than selectedHotelId");
+  }
+  const groundedMessage = assistantMessage
+    .toLowerCase()
+    .includes(matchedHotel.name.toLowerCase())
+    ? assistantMessage
+    : `${matchedHotel.name}: ${assistantMessage}`;
 
   return {
     ...fallback,
-    assistantMessage,
+    assistantMessage: groundedMessage,
     missingInformation,
   };
 }
@@ -108,6 +123,9 @@ export async function POST(request: Request) {
     const matchedHotel = hotels.find(
       (hotel) => hotel.id === fallback.matchedHotelId
     );
+    if (!matchedHotel) {
+      throw new Error("Deterministic traveler-agent match was not found");
+    }
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -121,33 +139,16 @@ export async function POST(request: Request) {
           {
             role: "system",
             content:
-              "You are a traveler-facing hotel agent for a strategy demo. Answer only from the provided Hotel Knowledge Graph. Do not invent prices, availability, amenities, policies, activities, or promotions. If information is missing, list what is missing. Cite exactly: Source: Hotel Knowledge Graph. Prefer direct-booking handoff when a suitable match exists. Return only JSON matching the schema.",
+              "You are a traveler-facing hotel agent for a strategy demo. The deterministic matcher has already selected exactly one hotel. Answer only for that selectedHotelId and selectedHotelName from the provided Hotel Knowledge Graph. Do not recommend, compare, or mention any other hotel. Do not invent prices, availability, amenities, policies, activities, or promotions. If information is missing, list what is missing. Cite exactly: Source: Hotel Knowledge Graph. Prefer direct-booking handoff when the selected hotel is suitable. Return only JSON matching the schema.",
           },
           {
             role: "user",
             content: JSON.stringify({
               travelerQuery: query,
+              selectedHotelId: fallback.matchedHotelId,
+              selectedHotelName: fallback.hotelName,
               deterministicMatch: fallback,
-              relevantHotelKnowledgeGraph: matchedHotel,
-              allCandidateHotels: hotels.map((hotel) => ({
-                id: hotel.id,
-                name: hotel.name,
-                type: hotel.type,
-                shortDescription: hotel.shortDescription,
-                liveLocalUpdates: hotel.liveLocalUpdates,
-                roomTypes: hotel.roomTypes,
-                offers: hotel.offers,
-                policies: hotel.policies,
-                amenities: hotel.amenities,
-                mealPlans: hotel.mealPlans,
-                onsenBathSauna: hotel.onsenBathSauna,
-                petPolicyDetails: hotel.petPolicyDetails,
-                businessTravelerAmenities: hotel.businessTravelerAmenities,
-                roomTechAmenities: hotel.roomTechAmenities,
-                localActivities: hotel.localActivities,
-                promotions: hotel.promotions,
-                maintenanceNotices: hotel.maintenanceNotices,
-              })),
+              selectedHotelKnowledgeGraph: matchedHotel,
             }),
           },
         ],
@@ -202,7 +203,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       mode: "llm-grounded",
-      result: normalizeLlmResult(parsed, fallback),
+      result: normalizeLlmResult(parsed, fallback, matchedHotel, hotels),
     } satisfies TravelerAgentResponse);
   } catch (error) {
     return NextResponse.json(fallbackResponse(query, hotels, error));

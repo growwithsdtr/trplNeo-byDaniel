@@ -81,6 +81,8 @@ export interface LiveLocalUpdate {
   affectedOffer?: string;
   eventTime?: string;
   bookingDeadline?: string;
+  eventLocation?: string;
+  repeatNote?: string;
   reputationSensitive?: boolean;
   sanitizedTravelerCopy?: boolean;
   priceImpact: string;
@@ -127,6 +129,9 @@ export interface BookingHandoff {
   children?: number;
   pets?: number;
   bedConfiguration?: string;
+  stayLengthDays?: number;
+  stayLengthNights?: number;
+  dateInterpretationNote?: string;
   rateYen?: number;
   handoffType?: "verified_booking_handoff" | "booking_inquiry_handoff";
   availabilityVerified?: boolean;

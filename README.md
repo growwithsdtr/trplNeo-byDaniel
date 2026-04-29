@@ -1,4 +1,4 @@
-# triplaNeoByDaniel
+# trplNeo-ByDaniel
 
 Agentic Hotel Discovery & Direct Booking for the AI Travel Era
 
@@ -13,7 +13,7 @@ Demo by Daniel Jimenez · Synthetic data · Senior PM Gen AI take-home prototype
 
 ## What this demo proves
 
-`triplaNeoByDaniel` is a take-home strategy prototype for a Senior Product Manager - Gen AI role in hospitality SaaS. It demonstrates how independent hotels can protect direct-booking economics as travel discovery shifts from Google/OTA search to AI agents such as ChatGPT, Gemini, Claude, and Perplexity.
+`trplNeo-ByDaniel` is a take-home strategy prototype for a Senior Product Manager - Gen AI role in hospitality SaaS. It demonstrates how independent hotels can protect direct-booking economics as travel discovery shifts from Google/OTA search to AI agents such as ChatGPT, Gemini, Claude, and Perplexity.
 
 The core product thesis:
 
@@ -23,7 +23,7 @@ The demo shows that a hotel-owned, standards-aligned knowledge graph can be enri
 
 ## Why this matters strategically
 
-If AI agents become a major travel discovery layer, hotels risk being represented by stale OTA-controlled summaries instead of hotel-owned facts. triplaNeoByDaniel reframes the opportunity as direct-booking infrastructure:
+If AI agents become a major travel discovery layer, hotels risk being represented by stale OTA-controlled summaries instead of hotel-owned facts. trplNeo-ByDaniel reframes the opportunity as direct-booking infrastructure:
 
 - AI Discoverability / AEO: make hotel-owned facts readable and citeable by agents.
 - Agentic Commerce Readiness: expose verified quote and booking-handoff actions.
@@ -36,7 +36,7 @@ If AI agents become a major travel discovery layer, hotels risk being represente
 - Polished Next.js dashboard with four tabs.
 - Three deep synthetic Nikko-style hotels.
 - Schema.org-inspired hotel knowledge graph.
-- triplaNeo live/local enrichment layer.
+- trplNeo-ByDaniel live/local enrichment layer.
 - Operator text update extraction using deterministic local logic.
 - Risk taxonomy and visible approval guardrails.
 - Human approval flow before publishing updates.
@@ -75,26 +75,6 @@ If AI agents become a major travel discovery layer, hotels risk being represente
 11. Generate the direct booking handoff and show the booking summary, dummy link, QR code, and potential direct GMV.
 12. Move to Metrics, Audit & Agent Tools to show readiness, OaaS counters, and the interactive tool-layer simulation.
 13. Close by emphasizing that payment is intentionally out of scope; the milestone is AI discovery -> verified quote -> direct booking handoff.
-
-## Deployment instructions
-
-Recommended deployment target: Vercel. Reviewers should primarily use the live URL above.
-
-Environment variables are optional:
-
-- `OPENAI_API_KEY` optional; if present, update extraction uses OpenAI with an 8-second timeout and deterministic fallback.
-- `OPENAI_MODEL` optional; defaults to `gpt-4o-mini`.
-- `DEEPGRAM_API_KEY` optional stretch only; voice input is disabled when absent.
-
-The deployed demo must remain useful with no API keys.
-
-Copy the example environment file when testing API-backed behavior locally:
-
-```bash
-cp .env.local.example .env.local
-```
-
-Leave `OPENAI_API_KEY` blank to keep deterministic fallback behavior. `.env.local` is gitignored and should never contain committed secrets.
 
 ## Simulated MCP-style endpoints
 
