@@ -491,15 +491,15 @@ export default function Home() {
               </div>
               <div className="mt-4 flex flex-col gap-3">
                 <Image
-                  src="/triplaNeo-byDaniel-logo.png"
+                  src="/trplNeo-byDaniel-reducedLogo.jpg"
                   alt="triplaNeo by Daniel logo"
-                  width={260}
-                  height={173}
+                  width={597}
+                  height={188}
                   priority
-                  className="h-auto w-56 rounded-md object-contain sm:w-64"
+                  className="h-auto w-64 rounded-md object-contain sm:w-72"
                 />
-                <h1 className="text-2xl font-semibold tracking-tight text-zinc-950 sm:text-3xl">
-                  triplaNeo - Agentic Hotel Discovery & Direct Booking for the AI Travel Era
+                <h1 className="text-xl font-semibold text-zinc-950 sm:text-[1.6rem] sm:leading-[1.18]">
+                  Agentic Hotel Discovery & Direct Booking for the AI Travel Era
                 </h1>
               </div>
             </div>
@@ -507,7 +507,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={startTour}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-orange-500 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-orange-500 px-5 text-sm font-medium text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30 sm:w-auto sm:min-w-40"
               >
                 <Sparkles className="h-4 w-4" />
                 Start Demo Tour
@@ -515,7 +515,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={resetDemo}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-orange-200 bg-white px-4 text-sm font-medium text-orange-700 shadow-sm transition hover:border-orange-300 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-orange-200 bg-white px-5 text-sm font-medium text-orange-700 shadow-sm transition hover:border-orange-300 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500/20 sm:w-auto sm:min-w-40"
               >
                 <RotateCcw className="h-4 w-4" />
                 Reset Demo
@@ -1193,7 +1193,10 @@ function StructuredUpdatePreview({ update }: { update: LiveLocalUpdate }) {
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <Fact label="Category" value={update.category} />
-        <Fact label="Affected dates" value={update.affectedDates.join(", ")} />
+        <Fact label="Affected dates" value={formatAffectedDates(update)} />
+        {update.timeContext ? (
+          <Fact label="Time context" value={update.timeContext} />
+        ) : null}
         {update.eventTime ? <Fact label="Event time" value={update.eventTime} /> : null}
         {update.bookingDeadline ? (
           <Fact label="Booking deadline" value={update.bookingDeadline} />
@@ -1225,6 +1228,13 @@ function StructuredUpdatePreview({ update }: { update: LiveLocalUpdate }) {
       </div>
     </div>
   );
+}
+
+function formatAffectedDates(update: LiveLocalUpdate) {
+  if (update.startDate && update.endDate && update.affectedDates.length > 1) {
+    return `${update.startDate} to ${update.endDate} (${update.affectedDates.length} affected days)`;
+  }
+  return update.affectedDates.join(", ") || "No date-specific impact";
 }
 
 function MultilingualPreview({ update }: { update: LiveLocalUpdate }) {
@@ -1365,6 +1375,10 @@ function BookingIntentCard({ intent }: { intent: BookingIntent }) {
         <Fact label="Selected hotel" value={intent.hotelName} />
         <Fact label="Check-in" value={intent.checkInDate} />
         <Fact label="Check-out" value={intent.checkOutDate} />
+        <Fact
+          label="Date context"
+          value={`${DEMO_DATE_CONTEXT} ${DEMO_TIMEZONE_LABEL}`}
+        />
         <Fact label="Guests" value={`${intent.guests} total`} />
         <Fact label="Adults" value={`${intent.adults}`} />
         <Fact label="Children" value={`${intent.children}`} />
@@ -1748,11 +1762,17 @@ function GraphCards({ hotel }: { hotel: HotelGraph }) {
     update.createdAt === DEMO_NOW || update.approvedAt === DEMO_APPROVED_AT;
   const liveUpdateItems = hotel.liveLocalUpdates.map((update) => {
     const sessionLabel = isSessionUpdate(update) ? " · New in this session" : "";
+    const dateRange =
+      update.startDate && update.endDate
+        ? ` · ${update.startDate} to ${update.endDate}`
+        : "";
     const timing = update.eventTime ? ` · ${update.eventTime}` : "";
+    const timeContext = update.timeContext ? ` · ${update.timeContext}` : "";
     const deadline = update.bookingDeadline
       ? ` · book by ${update.bookingDeadline}`
       : "";
-    return `${update.title}: ${update.travelerFacingSummary}${timing}${deadline}${sessionLabel}`;
+    const repeat = update.repeatNote ? ` · ${update.repeatNote}` : "";
+    return `${update.title}: ${update.travelerFacingSummary}${dateRange}${timing}${timeContext}${deadline}${repeat}${sessionLabel}`;
   });
   const sessionUpdateItems = hotel.liveLocalUpdates
     .filter(isSessionUpdate)

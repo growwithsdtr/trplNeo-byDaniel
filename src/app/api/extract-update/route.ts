@@ -89,11 +89,7 @@ function normalizeOpenAiUpdate(
   return {
     ...fallback,
     category: isCategory(parsed.category) ? parsed.category : fallback.category,
-    affectedDates:
-      Array.isArray(parsed.affectedDates) &&
-      parsed.affectedDates.some((item) => typeof item === "string")
-        ? parsed.affectedDates.filter((item): item is string => typeof item === "string")
-        : fallback.affectedDates,
+    affectedDates: fallback.affectedDates,
     affectedRoomTypes:
       Array.isArray(parsed.affectedRoomTypes) &&
       parsed.affectedRoomTypes.some((item) => typeof item === "string")

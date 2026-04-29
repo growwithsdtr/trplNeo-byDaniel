@@ -1,12 +1,6 @@
 import type { HotelGraph, LiveLocalUpdate, RiskLevel, UpdateCategory } from "@/lib/types";
-import {
-  DEMO_NOW,
-  DEMO_TODAY,
-  DEMO_TOMORROW,
-  DEMO_WEEKEND,
-  addDays,
-  dateRangeFrom,
-} from "@/lib/demo-date";
+import { parseOperatorDateContext } from "@/lib/date-parsing";
+import { DEMO_NOW } from "@/lib/demo-date";
 
 function hasAny(text: string, terms: string[]) {
   return terms.some((term) => text.includes(term));
@@ -118,22 +112,6 @@ function affectedRoomTypes(text: string, hotel: HotelGraph) {
   return [];
 }
 
-function affectedDates(text: string) {
-  if (text.includes("every night from today") && text.includes("one week")) {
-    return dateRangeFrom(DEMO_TODAY, 7);
-  }
-  if (text.includes("from today") && text.includes("one week")) {
-    return dateRangeFrom(DEMO_TODAY, 7);
-  }
-  if (text.includes("tomorrow")) return [DEMO_TOMORROW];
-  if (text.includes("weekend") || text.includes("saturday")) {
-    return [DEMO_WEEKEND.checkInDate, DEMO_WEEKEND.checkOutDate];
-  }
-  if (text.includes("wednesday")) return [DEMO_TODAY];
-  if (text.includes("today")) return [DEMO_TODAY];
-  return [DEMO_WEEKEND.checkInDate];
-}
-
 function titleForCategory(category: UpdateCategory) {
   const titles: Record<UpdateCategory, string> = {
     onsen_update: "Live onsen update",
@@ -160,11 +138,14 @@ function travelerSummary(input: string) {
 }
 
 function parseClockTime(text: string, term: "event" | "deadline") {
-  const pattern =
+  const match =
     term === "event"
-      ? /\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/
-      : /\b(?:by|book by|please book by)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/;
-  const match = text.match(pattern);
+      ? text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/) ??
+        text.match(/\b(\d{1,2})(?::(\d{2}))\s*(am|pm)?\b/) ??
+        text.match(/\b(\d{1,2})\s*(am|pm)\b/)
+      : text.match(
+          /\b(?:by|book by|please book by)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/
+        );
   if (!match) return undefined;
 
   let hour = Number(match[1]);
@@ -181,10 +162,23 @@ function parseClockTime(text: string, term: "event" | "deadline") {
 
 function eventLocation(text: string) {
   if (text.includes("lobby")) return "lobby";
+  if (text.includes("restaurant")) return "restaurant";
   if (text.includes("washitsu")) return "washitsu room";
   if (text.includes("garden")) return "garden";
   if (text.includes("lake")) return "lake";
   return undefined;
+}
+
+function sensitiveIncidentSummary(normalized: string, timeContext?: string) {
+  const location = eventLocation(normalized) ?? "affected area";
+  const timing = timeContext ? ` ${timeContext}` : "";
+  return `${location.charAt(0).toUpperCase()}${location.slice(1)} cleaning is in progress${timing}. We apologize for any temporary inconvenience.`;
+}
+
+function sensitiveInternalNotes(normalized: string, timeContext?: string) {
+  const location = eventLocation(normalized) ?? "affected area";
+  const timing = timeContext ? ` ${timeContext}` : "";
+  return `Reported vomit incident in ${location}; cleaning response${timing}.`;
 }
 
 function titleForInput(category: UpdateCategory, text: string) {
@@ -198,14 +192,14 @@ function titleForInput(category: UpdateCategory, text: string) {
   return titleForCategory(category);
 }
 
-function eventSummary(input: string, normalized: string) {
+function eventSummary(
+  input: string,
+  normalized: string,
+  repeatNote?: string
+) {
   const eventTime = parseClockTime(normalized, "event");
   const bookingDeadline = parseClockTime(normalized, "deadline");
   const location = eventLocation(normalized);
-  const repeatNote =
-    normalized.includes("every night") && normalized.includes("one week")
-      ? `Every night from ${DEMO_TODAY} through ${addDays(DEMO_TODAY, 6)}.`
-      : undefined;
 
   if (isShamisenText(normalized)) {
     const timeText = eventTime ? ` at ${eventTime}` : "";
@@ -288,7 +282,7 @@ function japanesePreview(category: UpdateCategory, summary: string) {
     guest_insight: "ゲスト傾向: よくある質問に基づく情報が追加されました。",
     crm_insight: "CRM傾向: セグメント別の関心事項が追加されました。",
     bot_insight: "Bot傾向: 問い合わせ傾向に基づく情報が追加されました。",
-    reputation_sensitive: "重要: ロビー清掃対応中です。ご不便をおかけします。",
+    reputation_sensitive: "重要: 館内の清掃対応中です。ご不便をおかけします。",
   };
   return previews[category];
 }
@@ -298,29 +292,37 @@ export function deterministicExtractUpdate(
   hotel: HotelGraph
 ): LiveLocalUpdate {
   const normalized = input.toLowerCase();
+  const dateContext = parseOperatorDateContext(input);
   const category = categoryForText(normalized);
   const risk = riskForText(normalized);
   const isSensitive = category === "reputation_sensitive";
   const localEvent = category === "local_event";
-  const event = localEvent ? eventSummary(input, normalized) : null;
+  const event = localEvent
+    ? eventSummary(input, normalized, dateContext.repeatNote)
+    : null;
   const summary = isSensitive
-    ? "Lobby cleaning is currently in progress. We apologize for any temporary inconvenience."
+    ? sensitiveIncidentSummary(normalized, dateContext.timeContext)
     : event?.summary ?? travelerSummary(input.replace(/samizen|shamizen/gi, "shamisen"));
   const internalNotes = isSensitive
-    ? "Reported vomit incident in lobby; cleaning response needed."
-    : event?.repeatNote
-      ? `Deterministic demo extraction. ${event.repeatNote}`
+    ? sensitiveInternalNotes(normalized, dateContext.timeContext)
+    : event?.repeatNote || dateContext.repeatNote
+      ? `Deterministic demo extraction. ${event?.repeatNote ?? dateContext.repeatNote}`
       : event?.eventLocation
         ? `Deterministic demo extraction. Event location: ${event.eventLocation}.`
-        : "Deterministic demo extraction. Production would route high-risk items through policy and approval controls.";
-  const extractedDates = affectedDates(normalized);
+        : dateContext.timeContext
+          ? `Deterministic demo extraction. Time context: ${dateContext.timeContext}.`
+          : dateContext.startDate && dateContext.endDate
+            ? `Deterministic demo extraction. Parsed date context: ${dateContext.startDate} to ${dateContext.endDate}.`
+            : "Deterministic demo extraction. Production would route high-risk items through policy and approval controls.";
 
   return {
     id: `update-${hotel.id}-${Date.now()}`,
     category,
     title: titleForInput(category, normalized),
     hotelId: hotel.id,
-    affectedDates: extractedDates,
+    affectedDates: dateContext.affectedDates,
+    startDate: dateContext.startDate,
+    endDate: dateContext.endDate,
     affectedRoomTypes: affectedRoomTypes(normalized, hotel),
     affectedOffer: normalized.includes("kaiseki")
       ? "Seasonal Kaiseki Direct Plan"
@@ -330,7 +332,8 @@ export function deterministicExtractUpdate(
     eventTime: event?.eventTime,
     bookingDeadline: event?.bookingDeadline,
     eventLocation: event?.eventLocation,
-    repeatNote: event?.repeatNote,
+    repeatNote: event?.repeatNote ?? dateContext.repeatNote,
+    timeContext: dateContext.timeContext,
     reputationSensitive: isSensitive,
     sanitizedTravelerCopy: isSensitive,
     priceImpact: normalized.includes("¥") || normalized.includes("price")

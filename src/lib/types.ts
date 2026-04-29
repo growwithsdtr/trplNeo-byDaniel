@@ -77,12 +77,15 @@ export interface LiveLocalUpdate {
   title: string;
   hotelId: string;
   affectedDates: string[];
+  startDate?: string;
+  endDate?: string;
   affectedRoomTypes: string[];
   affectedOffer?: string;
   eventTime?: string;
   bookingDeadline?: string;
   eventLocation?: string;
   repeatNote?: string;
+  timeContext?: string;
   reputationSensitive?: boolean;
   sanitizedTravelerCopy?: boolean;
   priceImpact: string;
